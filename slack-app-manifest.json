@@ -1,0 +1,55 @@
+{
+  "display_information": {
+    "name": "Rituales",
+    "description": "Juegos cortos para que tu equipo se conozca, en piloto automático.",
+    "background_color": "#B4552F"
+  },
+  "features": {
+    "bot_user": {
+      "display_name": "Rituales",
+      "always_online": true
+    },
+    "slash_commands": [
+      {
+        "command": "/rituales",
+        "url": "https://async-rituals.vercel.app/api/slack/commands",
+        "description": "Salir del ritual o volver a entrar",
+        "usage_hint": "salir",
+        "should_escape": false
+      }
+    ]
+  },
+  "oauth_config": {
+    "redirect_urls": [
+      "https://async-rituals.vercel.app/api/slack/oauth/callback"
+    ],
+    "scopes": {
+      "bot": [
+        "chat:write",
+        "channels:read",
+        "channels:join",
+        "users:read",
+        "im:write",
+        "commands"
+      ]
+    }
+  },
+  "settings": {
+    "event_subscriptions": {
+      "request_url": "https://async-rituals.vercel.app/api/slack/events",
+      "bot_events": [
+        "app_uninstalled",
+        "tokens_revoked",
+        "member_joined_channel",
+        "member_left_channel"
+      ]
+    },
+    "interactivity": {
+      "is_enabled": true,
+      "request_url": "https://async-rituals.vercel.app/api/slack/interactions"
+    },
+    "org_deploy_enabled": false,
+    "socket_mode_enabled": false,
+    "token_rotation_enabled": false
+  }
+}
