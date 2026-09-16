@@ -28,7 +28,7 @@ Sí — usamos Supabase
 
 ## Cómo quedó después del planning (2026-09-15)
 
-Las cuatro revisiones (office-hours, CEO, diseño, ingeniería) cambiaron el punto de partida. **Lo que manda ahora es `docs/plans/async-rituals-mvp-plan.md`** (plan activo, veredicto CEO + DISEÑO + ING aprobado). El design doc está en `docs/designs/async-rituals-mvp.md` y el registro de alcance en `docs/designs/ceo-plan-async-rituals-mvp.md`. Si algo de esta sección choca con el plan, gana el plan.
+Las cuatro revisiones (office-hours, CEO, diseño, ingeniería) cambiaron el punto de partida. **Lo que manda ahora es `docs/plans/async-rituals-mvp-plan.md`** (plan activo, veredicto CEO + DISEÑO + ING aprobado). **El estado real de la construcción (qué hitos ya están, dónde vive cada pieza, convenciones fijadas al implementar y lo que falta por hito) vive en `docs/BUILD-CONTEXT.md`: léelo antes de construir cualquier feature o juego.** El design doc está en `docs/designs/async-rituals-mvp.md` y el registro de alcance en `docs/designs/ceo-plan-async-rituals-mvp.md`. Si algo de esta sección choca con el plan, gana el plan.
 
 **El problema real.** No faltan juegos: el anfitrión humano se cansa. El producto es "el anfitrión que no se muere".
 
