@@ -19,10 +19,37 @@ Team cohesion erodes quietly — and the manager has no way to prove it's workin
 Slack-native UX, Wordle-style daily puzzles, Donut app
 
 ## MVP (punto de partida)
+_Texto original del brief. El alcance vigente está en «Cómo quedó después del planning», más abajo._
+
 We're building an asynchronous social-games bot that lives entirely inside Slack: a team lead installs it in minutes, points it at a channel, and from then on it automatically posts short AI-generated games a few times a week — guess-who quizzes built from teammates' own onboarding answers, two truths and a lie, trivia, quick this-or-that debates, and a daily puzzle — each playable in under two minutes on anyone's own schedule in any timezone, with points, streaks, and a weekly leaderboard supplying light competition. The content engine personalizes to each team, never repeats itself, and stays strictly work-appropriate and globally inclusive, while the bot's warm, low-pressure personality never pings, guilts, or names non-participants. Admins get a monthly aggregate-only digest showing participation and connection trends that justifies the flat monthly subscription ($0 to $199 by team size, credit-card purchase, no procurement), and the whole thing deliberately excludes video, live hosts, marketplaces, and destination websites — it's a small, continuous, opt-in team ritual embedded where work already happens.
 
 ## Guarda información
 Sí — usamos Supabase
+
+## Cómo quedó después del planning (2026-09-15)
+
+Las cuatro revisiones (office-hours, CEO, diseño, ingeniería) cambiaron el punto de partida. **Lo que manda ahora es `docs/plans/async-rituals-mvp-plan.md`** (plan activo, veredicto CEO + DISEÑO + ING aprobado). El design doc está en `docs/designs/async-rituals-mvp.md` y el registro de alcance en `docs/designs/ceo-plan-async-rituals-mvp.md`. Si algo de esta sección choca con el plan, gana el plan.
+
+**El problema real.** No faltan juegos: el anfitrión humano se cansa. El producto es "el anfitrión que no se muere".
+
+**MVP (alcance real).**
+- Un solo motor con 5 plantillas (`GameTemplate`: generate / render / score / reveal): adivina quién, dos verdades y una mentira, trivia, esto o aquello, puzzle. Más un recap del viernes. Rotación fija por slot; el puzzle es una plantilla más, no un juego diario.
+- Cola de contenido generada por adelantado (7-10 slots) con veto del admin desde la web. Nunca se llama a la IA desde un handler de Slack.
+- Puntos, rachas y tabla semanal como vistas SQL. Nunca puntos por velocidad.
+- Seis detalles aceptados en la revisión CEO: bienvenida al canal, momento de la semana en el recap, pausa de vacaciones, hitos de racha (5/10/25), DM privado al admin (sin nombres, tope de 7 días), `/rituales hecho`.
+- **Fuera del MVP:** pagos y planes, digest mensual por correo, insignias, multi-canal, transferencia de admin, App Directory, edición de juegos, pantalla de ajustes (tono, zona, idioma), i18n de los textos del bot. Lo diferido vive en `TODOS.md`.
+
+**Audiencia.** Primero el equipo de Pablo (7 personas, español, Ciudad de México). Segundo cliente: un equipo de 8-15 personas donde Pablo no es el jefe (semana 3); ese es el que prueba que juegan por gusto y no por cortesía. Nada se cobra hasta que dos equipos jueguen en la semana 4.
+
+**Idioma.** Textos del bot, UI y contenido en español (`America/Mexico_City`). Todo el código, nombres de archivos, tablas, columnas y variables en inglés.
+
+**Sistema visual.** Tema Cálido de raicode tal cual (`DESIGN.md` + `theme-tokens.css`); cero tokens nuevos. El bot y la app se llaman **"Rituales"** (comando `/rituales`). Teléfono primero, navegación abajo (Cola · Actividad · Conectar), modo oscuro en el header. Dos patrones documentados en DESIGN.md v1.2: alerta en línea y fila expandible. La web es solo para el admin: `/login`, `/conectar`, `/cola`, `/actividad`. Todos los textos de Slack viven en `lib/slack/strings.ts`.
+
+**Stack.** Next.js (App Router; se construye con la versión estable actual, 16) en Vercel + Supabase (Postgres con funciones `claim_due_games`, `submit_answer`, `get_bot_token`; RLS; Vault para el token de Slack) + Anthropic (tool use + zod) + `@slack/web-api`. Una sola app de Slack instalada por OAuth desde `slack-app-manifest.json`. Tick cada hora con 24 crons en `vercel.json`; ventanas por zona del equipo (posts ≥ 10:00, reveals ≥ 18:00 local). Publicación cerrada en seguro: nunca se re-publica un intento incierto. Pruebas: Vitest + Testing Library + msw + `scripts/smoke.ts`.
+
+**Orden de construcción (hitos).** 0 esqueleto visible en localhost, sin Slack (aquí se dispara `mvp-ready`) · 1 adivina-quién de punta a punta (exige Vercel + app de Slack: Slack no puede llegar a localhost) · 2 juegos de botones + IA · 3 puntos, rachas, recap · 4 trivia y puzzle por modal · 5 onboarding por modal · 6 veto, pausa, DM al admin, Salud · 7 stats, README con runbook, pulido.
+
+**Privacidad.** La web muestra solo agregados y la base de datos lo garantiza con RLS. El admin no ve protagonista ni respuesta antes del reveal. Sin `channels:history`. `/rituales borrar-mis-datos` borra todo lo de una persona.
 
 ---
 
