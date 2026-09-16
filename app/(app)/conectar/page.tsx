@@ -46,6 +46,7 @@ export default async function ConectarPage({ searchParams }: { searchParams: Pro
   let channelsError = false;
   let hasPosted = false;
   let hasQueued = false;
+  let activeMembers = 0;
   if (team && connected) {
     const db = createAdminClient();
     try {
@@ -54,12 +55,14 @@ export default async function ConectarPage({ searchParams }: { searchParams: Pro
       channelsError = true;
     }
     if (team.channel_id) {
-      const [{ count: posted }, { count: queued }] = await Promise.all([
+      const [{ count: posted }, { count: queued }, { count: members }] = await Promise.all([
         db.from("games").select("id", { count: "exact", head: true }).eq("team_id", team.id).in("status", ["posted", "revealing", "revealed"]),
         db.from("games").select("id", { count: "exact", head: true }).eq("team_id", team.id).eq("status", "queued").eq("is_sample", false),
+        db.from("members").select("id", { count: "exact", head: true }).eq("team_id", team.id).is("left_at", null).eq("opted_out", false),
       ]);
       hasPosted = (posted ?? 0) > 0;
       hasQueued = (queued ?? 0) > 0;
+      activeMembers = members ?? 0;
     }
   }
 
@@ -84,6 +87,12 @@ export default async function ConectarPage({ searchParams }: { searchParams: Pro
       {errorText ? <Alert tone="error">{errorText}</Alert> : null}
       {team?.channel_error_at && !params.error ? (
         <Alert tone="error">No puedo publicar en el canal; revisa que el bot siga dentro y vuelve a guardar.</Alert>
+      ) : null}
+      {connected && team?.channel_id && activeMembers < 2 ? (
+        <Alert tone="warning">
+          Rituales solo ve a {activeMembers === 1 ? "una persona" : "nadie"} en #{team.channel_name}. Los juegos necesitan al
+          menos dos: invita a tu equipo al canal desde Slack. Si ya están dentro, vuelve a guardar el canal.
+        </Alert>
       ) : null}
 
       <section className="flex flex-col gap-3" aria-labelledby="slack-heading">
@@ -151,7 +160,7 @@ export default async function ConectarPage({ searchParams }: { searchParams: Pro
         </section>
       ) : null}
 
-      {connected && team?.channel_id && !hasPosted && hasQueued ? (
+      {connected && team?.channel_id && !hasPosted && hasQueued && activeMembers >= 2 ? (
         <section className="flex flex-col gap-3" aria-labelledby="first-heading">
           <h2 id="first-heading" className="font-display text-(length:--text-lg)">Primer juego</h2>
           <p className="text-muted text-(length:--text-sm)">

@@ -12,7 +12,8 @@
     "typecheck": "tsc --noEmit",
     "migrate": "tsx scripts/migrate.ts",
     "check:anthropic": "tsx scripts/check-anthropic.ts",
-    "seed:facts": "tsx scripts/seed-facts.ts"
+    "seed:facts": "tsx scripts/seed-facts.ts",
+    "smoke": "tsx scripts/smoke.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.126.0",

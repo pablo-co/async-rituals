@@ -1,6 +1,6 @@
 # BUILD-CONTEXT — estado real de la construcción y contexto para lo que falta
 
-Última actualización: 2026-09-15 (fin del hito 1). Este archivo es el puente entre el plan
+Última actualización: 2026-09-16 (hito 1: código completo y probado; falta la prueba real en Slack). Este archivo es el puente entre el plan
 (`docs/plans/async-rituals-mvp-plan.md`, escrito antes de construir) y el código real.
 **Cuando el plan y este archivo choquen en detalles de implementación (rutas, nombres, firmas), gana este archivo;
 cuando choquen en decisiones de producto, gana el plan.** Actualízalo al cerrar cada hito.
@@ -23,7 +23,7 @@ Documentos de referencia (no repetidos aquí):
 | Hito | Estado | Verificado |
 | --- | --- | --- |
 | 0 · Esqueleto en localhost | ✅ hecho | login real con Supabase Auth; 3 pantallas; `/api/health`; migración 0001 aplicada |
-| 1 · Adivina quién de punta a punta | ✅ código publicado, **pendiente de prueba real en Slack** | rutas responden en producción (challenge, tick 401/200); falta: OAuth real, guardar canal, seed de hechos, primer post y reveal |
+| 1 · Adivina quién de punta a punta | ✅ código publicado y probado, **pendiente de prueba real en Slack** | OAuth real hecho (equipo Kublau, canal #rituales-bot, bienvenida enviada, crons corriendo); pruebas del tick y de respuestas con base falsa (`tests/tick.test.ts`, `tests/answers.test.ts`); `npm run smoke` 20/20 contra la base real; falta: ≥ 2 personas en el canal, seed de hechos, primer post y reveal |
 | 2 · Juegos de botones + IA | ⬜ | — |
 | 3 · Puntos, rachas, recap | ⬜ | — |
 | 4 · Trivia y puzzle por modal | ⬜ | — |
@@ -124,14 +124,21 @@ lib/
   supabase/             client.ts (browser) · server.ts (cookies) · admin.ts (service role, server-only)
   ai/sample-content.json  5 juegos de muestra (solo vista previa de Cola por ahora)
 supabase/migrations/0001_init.sql   esquema v1 completo (ver §4)
-scripts/                migrate.ts · seed-facts.ts (JSON con name|slack_user_id, question_key, text) · check-anthropic.ts
+scripts/                migrate.ts · seed-facts.ts (JSON con name|slack_user_id, question_key, text) · check-anthropic.ts ·
+                        smoke.ts (equipo desechable contra la base real: Vault, claim concurrente, submit_answer, sweep, ventana de reveal, RLS, vistas)
 tests/                  Vitest + Testing Library; `server-only` se alias a tests/empty.ts (vitest.config.mts)
+  helpers/fake-db.ts    Supabase en memoria (from/select/update/insert + filtros + embeds + rpc) con `defaultRpcs` que imitan
+                        sweep_games / claim_due_games / submit_answer / get_bot_token; `db.add(...)` siembra, `db.events(kind)` lee
+  helpers/fixtures.ts   team/member/fact/game/answer, fakeSlack() (chat.postMessage/update grabados), slackPlatformError(code)
+  tick.test.ts          postGame/revealGame/tickTeam/runTick: fail-closed, desconexión, canal, reveal idempotente, refill, aislamiento
+  answers.test.ts       handleAnswerSubmission con fetch simulado (Guardado / Cambiado / protagonista / cerró / fuera)
 vercel.json             24 crons `0 H * * *` → /api/tick
 slack-app-manifest.json fuente de verdad de la app de Slack (scopes, URLs, eventos)
 ```
 
 Scripts: `npm run dev` · `npm test` · `npm run typecheck` · `npm run lint` · `npm run build` · `npm run migrate` ·
-`npm run seed:facts -- seed/facts.json` · `npm run check:anthropic`. Dev server desde Claude: `.claude/launch.json` → `rituales-dev`.
+`npm run seed:facts -- seed/facts.json` · `npm run check:anthropic` · `npm run smoke` (crea y borra un equipo `SMOKE-…` con su usuario
+de auth; corre contra la base real, nunca en paralelo con otro smoke). Dev server desde Claude: `.claude/launch.json` → `rituales-dev`.
 
 ---
 
@@ -197,12 +204,16 @@ Pendiente (hito 6): nada nuevo en esquema; `paused_until`, `material_alert_sent_
 ## 6. Lo que falta, hito por hito (con archivos)
 
 ### Hito 1 · cierre (pendiente de Pablo + verificación)
-1. Pablo: "Agregar a Slack" en `/conectar`, elegir canal, Guardar (bienvenida + miembros + fill vacío porque no hay hechos).
-2. Cargar hechos: escribir `seed/facts.json` con lo que Pablo mande → `npm run seed:facts -- seed/facts.json`.
+1. ✅ Pablo conectó Slack (2026-09-16): equipo Kublau, canal #rituales-bot, cadencia 5, bienvenida enviada. **Solo hay una
+   persona en el canal** (Pablo): Adivina quién necesita ≥ 2 activos (el render lanza "No hay nadie que pueda adivinar" y el
+   juego se salta con `template_error`). Conectar ya avisa con `alert-warning` y esconde "Publicar el primero ahora" mientras
+   haya < 2. Los miembros nuevos entran por `member_joined_channel` o al volver a guardar el canal (`syncMembers`).
+2. Cargar hechos: escribir `seed/facts.json` (gitignored) con lo que Pablo mande → `npm run seed:facts -- seed/facts.json`.
 3. Rellenar la cola: `curl -X POST https://async-rituals.vercel.app/api/queue/fill -H "Authorization: Bearer $CRON_SECRET"`.
 4. Pablo: "Publicar el primero ahora" → verificar post, botón, ack efímero, reveal (≥ 4 h y ≥ 18:00 local) e hilo.
-5. `scripts/smoke.ts` (T6, ET7): claim concurrente, `submit_answer` tras `revealing`, RLS, Vault. Marcar `gstack-shortcut(dec-88b9fc96)`.
-6. Pruebas del tick con `db` y `slack` falsos (fases con `now` inyectado) — hoy no existen.
+5. ✅ `scripts/smoke.ts` (T6, ET7) con `gstack-shortcut(dec-88b9fc96)`: 20 comprobaciones en verde el 2026-09-16.
+6. ✅ Pruebas del tick y de respuestas con base y Slack falsos (`tests/helpers/*`). Al agregar plantillas o fases nuevas,
+   extender `defaultRpcs` solo si el SQL real cambia (la verdad del SQL la prueba el smoke, no la base falsa).
 
 ### Hito 2 · Juegos de botones + IA
 - `lib/games/two-truths.ts`: material de `facts` kind `two_truths` sin usar (misma reserva que guess_who); render: 3 frases
