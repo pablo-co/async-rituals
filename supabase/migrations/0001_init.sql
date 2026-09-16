@@ -470,6 +470,14 @@ begin
 end $$;
 
 -- ---------------------------------------------------------------------------
+-- health(): la única función que puede llamar cualquiera. Prueba que la base contesta.
+-- ---------------------------------------------------------------------------
+create or replace function public.health()
+returns timestamptz language sql stable as $$
+  select now();
+$$;
+
+-- ---------------------------------------------------------------------------
 -- RLS: encendido en todo. Sin políticas = nadie salvo service_role.
 -- ---------------------------------------------------------------------------
 alter table public.teams   enable row level security;
@@ -486,3 +494,4 @@ revoke all on all tables in schema public from anon, authenticated;
 revoke all on all functions in schema public from anon, authenticated, public;
 grant select on public.teams_admin, public.games_admin, public.events_admin to authenticated;
 grant execute on function public.admin_activity(uuid) to authenticated;
+grant execute on function public.health() to anon, authenticated;
