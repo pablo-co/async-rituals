@@ -124,6 +124,12 @@ Agregados en la revisión de diseño del plan (2026-09-15). Sin tokens nuevos: u
 - **Alerta en línea** (`alert-success` / `alert-warning` / `alert-error` / `alert-info`; las tres primeras ya existen en `theme-tokens.css`, `alert-info` se agrega en `globals.css` con `--c-info-bg` / `--c-on-info-bg`): bloque de `padding: 12px 14px`, `radius md`, fondo del tono semántico y texto en su `--c-on-*-bg`, `--text-sm`. **Sin `border-left`** (anti-pattern de IA). Va arriba de la sección a la que aplica, nunca flotando. El texto dice qué pasó y qué hacer ("No pude guardar. Revisa que el bot siga en el canal."). Para confirmar lo hecho se usa `toast`; la alerta es para lo que necesita atención o decisión. Un ícono funcional de 18 px solo si etiqueta el tono (`circle-alert`, `check`), con `aria-hidden`.
 - **Fila expandible** (`list-row-details`): un `<details>` nativo cuyo `<summary>` es un `list-row` (min-height 56 px, título + meta + badge a la derecha) con chevron `chevron-down` de 20 px que rota 180° al abrir (200 ms, el único motion). Abierto por default solo cuando el estado es error; cerrado en verde. El contenido expandido son `list-row` anidadas en `--c-text-muted`. Teclado: Enter/Espacio en el summary; `aria-expanded` lo pone el navegador.
 
+Utilidades en `app/globals.css` para estos dos patrones y dos ajustes de este proyecto:
+- `alert-inline` (padding, gap, tamaño de texto) + `alert-success` / `alert-warning` / `alert-error` / `alert-info` (tono).
+- `list-row-details` para el `<details>`; dentro, `summary.list-row`, `.list-row-chevron` y `.list-row-body`.
+- `page-narrow`: columna de 640 px en escritorio (D-6A), en lugar de `--page-max`.
+- `.tab[aria-current="page"]`: mismo estilo que `aria-selected` cuando las tabs son enlaces de navegación.
+
 ## Anti-patterns v1.1
 
 - Nunca menú hamburguesa. Con 2-5 secciones va bottom-nav; con más, cuatro y "Más".

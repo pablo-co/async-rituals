@@ -1,0 +1,26 @@
+{
+  "games": [
+    { "type": "guess_who", "preview": null },
+    {
+      "type": "this_or_that",
+      "preview": "¿Café o té para arrancar el día?",
+      "options": ["Café", "Té"],
+      "reveal_quip": "Los del té: tranquilos, la cafeína no es una competencia."
+    },
+    { "type": "two_truths", "preview": null },
+    {
+      "type": "trivia",
+      "preview": "Trivia de 3: mapas, inventos y palabras",
+      "questions": [
+        { "q": "¿Cuál es el país más grande de Sudamérica?", "options": ["Argentina", "Brasil", "Perú"], "correct": 1 },
+        { "q": "¿Qué inventó Johannes Gutenberg?", "options": ["El telescopio", "La imprenta", "La brújula"], "correct": 1 },
+        { "q": "¿Cuál de estas palabras se lee igual al revés?", "options": ["Reconocer", "Ventana", "Escalera"], "correct": 0 }
+      ]
+    },
+    {
+      "type": "puzzle",
+      "preview": "Acertijo: tengo agujas y no coso. ¿Qué soy?",
+      "accepted_answers": ["reloj", "el reloj", "un reloj"]
+    }
+  ]
+}
