@@ -4,6 +4,8 @@ Bot de Slack que publica juegos cortos para que un equipo remoto se conozca, en 
 adivina quién, dos verdades y una mentira, trivia, esto o aquello y puzzle, más un recap del viernes.
 El admin tiene una web mínima (Conectar · Cola · Actividad); el equipo solo juega en Slack.
 
+**App en vivo:** https://async-rituals.vercel.app (cada `git push` a `main` la actualiza sola).
+
 El plan completo vive en `docs/plans/async-rituals-mvp-plan.md`. Las reglas del proyecto, en `CLAUDE.md`.
 
 ## Correr en tu compu
