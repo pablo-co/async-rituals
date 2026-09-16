@@ -99,10 +99,10 @@ export function slackRateLimitError(): Error {
   return error;
 }
 
-/** Recording WebClient with `chat.postMessage` and `chat.update`. Each call is queued in `calls`. */
+/** Recording WebClient with `chat.postMessage`, `chat.update`, `chat.postEphemeral` and `views.open`. */
 export function fakeSlack() {
   let counter = 0;
-  const calls: { method: "chat.postMessage" | "chat.update"; args: Record<string, unknown> }[] = [];
+  const calls: { method: "chat.postMessage" | "chat.update" | "chat.postEphemeral" | "views.open"; args: Record<string, unknown> }[] = [];
   const postMessage = vi.fn(async (args: Record<string, unknown>) => {
     calls.push({ method: "chat.postMessage", args });
     counter += 1;
@@ -112,8 +112,16 @@ export function fakeSlack() {
     calls.push({ method: "chat.update", args });
     return { ok: true };
   });
-  const client = { chat: { postMessage, update } } as unknown as WebClient;
-  return { client, calls, postMessage, update };
+  const postEphemeral = vi.fn(async (args: Record<string, unknown>) => {
+    calls.push({ method: "chat.postEphemeral", args });
+    return { ok: true };
+  });
+  const viewsOpen = vi.fn(async (args: Record<string, unknown>) => {
+    calls.push({ method: "views.open", args });
+    return { ok: true };
+  });
+  const client = { chat: { postMessage, update, postEphemeral }, views: { open: viewsOpen } } as unknown as WebClient;
+  return { client, calls, postMessage, update, postEphemeral, viewsOpen };
 }
 
 export function blockTypes(blocks: unknown): string[] {

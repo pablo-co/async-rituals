@@ -4,13 +4,18 @@
     {
       "type": "this_or_that",
       "preview": "¿Café o té para arrancar el día?",
+      "question": "¿Café o té para arrancar el día?",
       "options": ["Café", "Té"],
-      "reveal_quip": "Los del té: tranquilos, la cafeína no es una competencia."
+      "quips": [
+        "Los del café: se les nota la prisa desde aquí, pero con cariño.",
+        "Los del té: tranquilos, la cafeína no es una competencia."
+      ]
     },
     { "type": "two_truths", "preview": null },
     {
       "type": "trivia",
       "preview": "Trivia de 3: mapas, inventos y palabras",
+      "title": "Trivia de 3: mapas, inventos y palabras",
       "questions": [
         { "q": "¿Cuál es el país más grande de Sudamérica?", "options": ["Argentina", "Brasil", "Perú"], "correct": 1 },
         { "q": "¿Qué inventó Johannes Gutenberg?", "options": ["El telescopio", "La imprenta", "La brújula"], "correct": 1 },
@@ -19,8 +24,10 @@
     },
     {
       "type": "puzzle",
-      "preview": "Acertijo: tengo agujas y no coso. ¿Qué soy?",
-      "accepted_answers": ["reloj", "el reloj", "un reloj"]
+      "preview": "Tengo agujas y no coso, tengo números y no soy libro. ¿Qué soy?",
+      "prompt": "Tengo agujas y no coso, tengo números y no soy libro. ¿Qué soy?",
+      "answer": "Un reloj",
+      "accepted_answers": ["reloj", "el reloj", "un reloj", "relojes"]
     }
   ]
 }

@@ -3,8 +3,9 @@ import { Alert } from "@/components/Alert";
 import { Badge } from "@/components/Badge";
 import { SubmitButton } from "@/components/SubmitButton";
 import { requireAdmin } from "@/lib/db/session";
-import { hasSlackConfig } from "@/lib/env";
+import { hasAnthropicKey, hasSlackConfig } from "@/lib/env";
 import { getSlackClient } from "@/lib/slack/client";
+import { strings } from "@/lib/slack/strings";
 import { listPublicChannels, type ChannelOption } from "@/lib/slack/members";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { CADENCE_DAYS, cadenceLabel, type Cadence } from "@/lib/time";
@@ -88,6 +89,7 @@ export default async function ConectarPage({ searchParams }: { searchParams: Pro
       {team?.channel_error_at && !params.error ? (
         <Alert tone="error">No puedo publicar en el canal; revisa que el bot siga dentro y vuelve a guardar.</Alert>
       ) : null}
+      {connected && team?.channel_id && !hasAnthropicKey() ? <Alert tone="warning">{strings.sampleWarning}</Alert> : null}
       {connected && team?.channel_id && activeMembers < 2 ? (
         <Alert tone="warning">
           Rituales solo ve a {activeMembers === 1 ? "una persona" : "nadie"} en #{team.channel_name}. Los juegos necesitan al

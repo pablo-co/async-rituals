@@ -14,6 +14,7 @@ export const strings = {
   contextClosed: (played: number, total: number) => `Cerrado · ${played} de ${total} jugaron`,
   contextResumed: "Ya volvimos.",
   selectPlaceholder: "Elige a alguien",
+  play: "Jugar",
 
   ackSaved: (option: string) => `Guardado: ${option}. Puedes cambiarlo hasta esta tarde.`,
   ackChanged: (option: string) => `Cambiado a: ${option}.`,
@@ -25,6 +26,8 @@ export const strings = {
   rejoined: "Listo, ya estás de vuelta en el ritual.",
   left: "Listo, ya no te incluyo. Cuando quieras volver:",
   commandSoon: "Ese comando llega pronto. Por ahora: /rituales salir.",
+  saveFailed: "No pude guardar tu respuesta. Inténtalo de nuevo.",
+  modalFailed: "No pude abrir el juego. Inténtalo de nuevo.",
 
   welcome: (days: string, pausedUntil: string | null) =>
     `Hola, soy Rituales. Voy a publicar juegos cortos aquí los ${days} por la mañana` +
@@ -45,6 +48,40 @@ export const strings = {
       fooled === 0 ? `${name} no engañó a nadie esta vez.` : `${name} engañó a ${fooled} (+${bonus}).`,
     ask: (name: string) => `${name}, ¿nos cuentas?`,
   },
+
+  thisOrThat: {
+    /** "{A}: {n} · {B}: {m}." — no winner, on purpose. */
+    revealLine: (a: string, n: number, b: string, m: number) => `${a}: ${n} · ${b}: ${m}.`,
+  },
+
+  trivia: {
+    intro: (count: number) => `${count} preguntas rápidas. Toca *Jugar* para contestarlas en privado.`,
+    revealLine: (answers: string[]) => `Respuestas: ${answers.map((a, i) => `${i + 1} ${a}`).join(" · ")}.`,
+    perfect: (names: string[]) =>
+      names.length === 0
+        ? "Nadie hizo ronda perfecta esta vez. Todos los que jugaron suman 1 más 1 por acierto."
+        : `Ronda perfecta: ${joinEs(names)} (+2). Todos los que jugaron suman 1 más 1 por acierto.`,
+    ackSaved: (count: number) => `Guardado: ${count} respuestas. Puedes cambiarlas hasta esta tarde.`,
+  },
+
+  puzzle: {
+    intro: "Toca *Jugar* para escribir tu respuesta en privado.",
+    revealLine: (answer: string) => `La respuesta era: *${answer}*.`,
+    solved: (names: string[]) => (names.length === 0 ? "Nadie lo resolvió esta vez." : `Lo resolvieron ${joinEs(names)} (+2).`),
+    ackSaved: (text: string) => `Guardado: ${text}. Puedes cambiarlo hasta esta tarde.`,
+  },
+
+  modal: {
+    submit: "Enviar",
+    close: "Cancelar",
+    pickOne: "Elige una opción",
+    emptyAnswer: "Escribe una respuesta",
+    puzzleLabel: "Tu respuesta",
+    puzzleHint: "Una o dos palabras. No importan mayúsculas ni acentos.",
+  },
+
+  sampleWarning:
+    "Sin llave de Anthropic: solo se publican Adivina quién y Dos verdades. Trivia, Esto o aquello y Puzzle esperan la llave.",
 
   admin: {
     channelError: (channel: string) =>

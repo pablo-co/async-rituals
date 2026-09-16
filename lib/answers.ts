@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { GameRow, MemberRow } from "@/lib/db/types";
 import { logEvent } from "@/lib/events";
+import { TEMPLATES } from "@/lib/games/registry";
 import { actions, button, section } from "@/lib/slack/blocks";
 import { strings } from "@/lib/slack/strings";
 import { ephemeral, postToResponseUrl } from "@/lib/slack/verify";
@@ -51,7 +52,7 @@ export async function handleAnswerSubmission(
   });
   if (error) {
     await logEvent(db, { teamId: game.team_id, kind: "answer_failed", gameId: game.id, detail: { message: error.message } });
-    return reply("No pude guardar tu respuesta. Inténtalo de nuevo.");
+    return reply(strings.saveFailed);
   }
   if (!accepted) return reply(strings.closed);
 
@@ -59,8 +60,10 @@ export async function handleAnswerSubmission(
   return reply(existing ? strings.ackChanged(label) : strings.ackSaved(label));
 }
 
-/** What the person picked, in words. For guess-who the choice is a member id. */
+/** What the person picked, in words: the template knows (this or that); otherwise the choice is a member id. */
 async function choiceLabel(db: SupabaseClient, game: GameRow, choice: string): Promise<string> {
+  const custom = TEMPLATES[game.type]?.labelFor?.(game, choice);
+  if (custom) return custom;
   if (game.type === "guess_who" || game.type === "two_truths") {
     const { data } = await db.from("members").select("display_name").eq("id", choice).maybeSingle();
     if (data?.display_name) return data.display_name as string;

@@ -53,6 +53,8 @@ export interface GameTemplate {
   score(game: GameRow, answers: AnswerRow[]): Map<string, number | null>;
   reveal(input: RevealInput): RevealOutput;
   closed(game: GameRow, members: MemberRow[]): RenderedPost;
+  /** Human label for a button choice in the "Guardado: …" ack. Absent → the choice is a member id. */
+  labelFor?(game: GameRow, choice: string): string | null;
 }
 
 /** Hash of normalized text (lowercase, no punctuation) so the same question never repeats. */

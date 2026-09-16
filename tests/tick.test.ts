@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { GameRow, TeamRow } from "@/lib/db/types";
 import { postGame, revealGame, runTick, tickTeam, type TickDeps } from "@/lib/tick";
 import { startRun } from "@/lib/runs";
@@ -34,8 +34,23 @@ function setup(overrides: { team?: Partial<TeamRow>; game?: Partial<GameRow> | n
   return { db, slack, deps, run, currentTeam };
 }
 
+// The AI templates are exercised with canned content: no network in `npm test`.
+vi.mock("@/lib/ai/generate", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/ai/generate")>()),
+  generateThisOrThat: vi.fn(async () => ({ question: "¿Café o té?", options: ["Café", "Té"], quips: ["A", "B"] })),
+  generateTrivia: vi.fn(async () => ({
+    title: "Trivia de 3",
+    questions: Array.from({ length: 3 }, (_, i) => ({ q: `P${i}`, options: ["a", "b", "c"], correct: i })),
+  })),
+  generatePuzzle: vi.fn(async () => ({ prompt: "¿Qué soy?", answer: "reloj", accepted_answers: ["el reloj"] })),
+}));
+
 beforeEach(() => {
   vi.spyOn(console, "error").mockImplementation(() => {});
+  process.env.ANTHROPIC_API_KEY = "test-key";
+});
+afterEach(() => {
+  delete process.env.ANTHROPIC_API_KEY;
 });
 
 describe("postGame", () => {
@@ -191,12 +206,21 @@ describe("tickTeam", () => {
     const morning = await tickTeam(deps(POST_TIME), run, currentTeam());
     expect(morning).toMatchObject({ posted: 1, revealed: 0, swept: 0 });
     expect(db.find("games", "g1").status).toBe("posted");
-    // The queue was empty after posting, so the fill created games from the two unused facts (f1 is used now).
-    const queued = db.table("games").filter((g) => g.status === "queued");
-    expect(queued).toHaveLength(2);
-    expect(new Set(queued.map((g) => g.slot_date)).size).toBe(2);
-    expect(queued.every((g) => String(g.slot_date) > "2026-09-16")).toBe(true);
-    expect(run.counts.generated).toBe(2);
+    // The queue was empty after posting, so the fill created a full week ahead: AI games plus a guess-who from an unused fact.
+    const queued = db
+      .table("games")
+      .filter((g) => g.status === "queued")
+      .sort((a, b) => String(a.slot_date).localeCompare(String(b.slot_date)));
+    expect(queued).toHaveLength(8);
+    expect(new Set(queued.map((g) => g.slot_date)).size).toBe(8);
+    expect(queued.every((g) => String(g.slot_date) > "2026-09-16" && !g.is_sample)).toBe(true);
+    expect(new Set(queued.map((g) => g.type))).toEqual(new Set(["guess_who", "this_or_that", "trivia", "puzzle"]));
+    for (let i = 1; i < queued.length; i += 1) expect(queued[i].type).not.toBe(queued[i - 1].type);
+    const guess = queued.filter((g) => g.type === "guess_who");
+    expect(guess.length).toBeGreaterThanOrEqual(1);
+    expect(guess.every((g) => ["f2", "f3"].includes(String((g.payload as { fact_id: string }).fact_id)))).toBe(true);
+    expect(queued.find((g) => g.type === "this_or_that")?.payload).toMatchObject({ preview: "¿Café o té?", options: ["Café", "Té"] });
+    expect(run.counts.generated).toBe(8);
     expect(currentTeam().last_tick_at).toBe(POST_TIME.toISOString());
 
     // Nothing to reveal at 16:00 local even though 4 h passed: the rule is ≥ 18:00.
@@ -217,6 +241,23 @@ describe("tickTeam", () => {
     expect(counts).toEqual({ swept: 0, posted: 0, revealed: 0, skipped: 0, deferred: 0 });
     expect(slack.postMessage).not.toHaveBeenCalled();
     expect(db.events()).toHaveLength(0);
+  });
+
+  it("fills with flagged sample content without an Anthropic key, and the tick never posts it", async () => {
+    delete process.env.ANTHROPIC_API_KEY;
+    const { db, slack, deps, run, currentTeam } = setup({ game: null });
+    await tickTeam(deps(POST_TIME), run, currentTeam());
+    const samples = db.table("games").filter((g) => g.is_sample);
+    expect(samples.length).toBeGreaterThanOrEqual(5);
+    expect(samples.every((g) => g.status === "queued" && typeof (g.payload as { preview?: unknown }).preview === "string")).toBe(true);
+
+    // Make one sample due: the sweep skips it as `sample`; Slack is never called.
+    const due = samples[0];
+    due.scheduled_for = new Date(POST_TIME.getTime() - 30 * 60_000).toISOString();
+    const counts = await tickTeam(deps(POST_TIME), run, currentTeam());
+    expect(counts.swept).toBe(1);
+    expect(db.find("games", String(due.id))).toMatchObject({ status: "skipped", skip_reason: "sample" });
+    expect(slack.postMessage).not.toHaveBeenCalled();
   });
 
   it("does not refill a disconnected team", async () => {

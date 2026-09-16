@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
+import { after } from "next/server";
 import { requireAdmin } from "@/lib/db/session";
 import { logEvent } from "@/lib/events";
 import { fillTeam } from "@/lib/queue/fill";
@@ -78,7 +79,15 @@ export async function saveChannelAction(formData: FormData) {
       }
     }
 
-    await fillTeam(db, fresh, now);
+    // The first week generates in the background (AI takes a while); Cola shows "Generando…" and polls.
+    after(async () => {
+      try {
+        await fillTeam(db, fresh, new Date());
+      } catch (fillError) {
+        const message = fillError instanceof Error ? fillError.message : String(fillError);
+        await logEvent(db, { teamId: team.id, kind: "fill_failed", detail: { message: message.slice(0, 300) } });
+      }
+    });
   } catch (error) {
     await logEvent(db, { teamId: team.id, kind: "save_channel_failed", detail: describeSlackError(error) });
     outcome = "join";
@@ -93,7 +102,9 @@ export async function saveChannelAction(formData: FormData) {
   const params = new URLSearchParams({ saved: "1", next: next ? dayName(next) : cadenceLabel(cadence as Cadence) });
   if (warning) params.set("warning", warning);
   if (outcome === "sync") params.set("warning", "sync");
-  redirect(`/conectar?${params.toString()}`);
+  if (warning || outcome === "sync") redirect(`/conectar?${params.toString()}`);
+  params.set("generating", "1");
+  redirect(`/cola?${params.toString()}`);
 }
 
 /** "Publicar el primero ahora": the first queued game gets scheduled_for = now and goes through the same post path as the tick. */

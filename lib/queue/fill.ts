@@ -3,6 +3,7 @@ import type { TeamRow } from "@/lib/db/types";
 import { DbError } from "@/lib/errors";
 import { logEvent } from "@/lib/events";
 import { availableRotation, TEMPLATES } from "@/lib/games/registry";
+import type { GameType } from "@/lib/games/types";
 import type { GeneratedGame, TemplateContext } from "@/lib/games/template";
 import type { Run } from "@/lib/runs";
 import { localParts, nextSlotDates, slotScheduledFor, type Cadence } from "@/lib/time";
@@ -31,6 +32,26 @@ export async function futureQueue(db: SupabaseClient, team: TeamRow, now: Date) 
     .in("status", ["queued", "posting"]);
   if (error) throw new DbError(error.message, error.code);
   return (data ?? []) as { id: string; slot_date: string; type: string; status: string; is_sample: boolean }[];
+}
+
+/** Type of the team's latest game (by slot), so two consecutive slots avoid the same template when one lacks material. */
+async function lastGameType(db: SupabaseClient, teamId: string): Promise<GameType | null> {
+  const { data } = await db
+    .from("games")
+    .select("type")
+    .eq("team_id", teamId)
+    .neq("type", "recap")
+    .in("status", ["queued", "posting", "posted", "revealing", "revealed"])
+    .order("slot_date", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  return (data as { type?: GameType } | null)?.type ?? null;
+}
+
+/** Keeps the rotation order but moves `previous` to the end, so a repeat only happens when nothing else has material. */
+export function preferDifferent<T>(order: T[], previous: T | null): T[] {
+  if (order.length < 2 || previous === null || order[0] !== previous) return order;
+  return [...order.slice(1), order[0]];
 }
 
 /**
@@ -70,10 +91,11 @@ export async function fillTeam(
   let created = 0;
   let empty = 0;
   const ctx: TemplateContext = { db, team, now };
+  let previousType: GameType | null = await lastGameType(db, team.id);
 
   for (const slotDate of dates) {
     let generated: GeneratedGame | null = null;
-    for (const type of availableRotation(index)) {
+    for (const type of preferDifferent(availableRotation(index), previousType)) {
       const template = TEMPLATES[type]!;
       try {
         generated = await template.generate(ctx, { slotDate });
@@ -93,6 +115,7 @@ export async function fillTeam(
       empty += 1;
       continue;
     }
+    previousType = generated.type;
     const { error } = await db.from("games").insert({
       team_id: team.id,
       type: generated.type,

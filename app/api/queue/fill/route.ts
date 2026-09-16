@@ -1,3 +1,4 @@
+import { after } from "next/server";
 import { authorizedCron } from "@/lib/cron";
 import { findTeamByAdmin } from "@/lib/db/teams";
 import { logEvent } from "@/lib/events";
@@ -32,12 +33,14 @@ export async function POST(request: Request) {
   const team = await findTeamByAdmin(db, user.id);
   if (!team || !team.channel_id) return Response.json({ ok: false, error: "sin canal" }, { status: 400 });
 
-  try {
-    const result = await fillTeam(db, team, now);
-    return Response.json({ ok: true, ...result });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    await logEvent(db, { teamId: team.id, kind: "fill_failed", detail: { message: message.slice(0, 300) } });
-    return Response.json({ ok: false, error: message }, { status: 500 });
-  }
+  // The web never waits for the AI: 202 now, generation in the background, the queue page polls.
+  after(async () => {
+    try {
+      await fillTeam(db, team, now);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      await logEvent(db, { teamId: team.id, kind: "fill_failed", detail: { message: message.slice(0, 300) } });
+    }
+  });
+  return Response.json({ ok: true, started: true }, { status: 202 });
 }

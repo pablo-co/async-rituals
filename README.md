@@ -29,6 +29,10 @@ npm run dev                  # http://localhost:3000
 | `npm run typecheck`| revisa tipos                                                    |
 | `npm run lint`     | revisa estilo de código                                         |
 | `npm run migrate`  | aplica las migraciones pendientes (usa `DATABASE_URL`)          |
+| `npm run smoke`    | prueba el SQL real con un equipo desechable (claim, Vault, RLS…) |
+| `npm run eval`     | genera un juego de cada tipo con Anthropic y valida el formato   |
+| `npm run seed:facts -- seed/facts.json` | carga hechos para Adivina quién                     |
+| `npm run check:anthropic` | comprueba que la llave de Anthropic sirve                  |
 
 ## Estructura
 

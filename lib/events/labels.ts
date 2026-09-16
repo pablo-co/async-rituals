@@ -51,6 +51,7 @@ export const EVENT_KINDS = [
   "save_channel_failed",
   "tick_failed",
   "fill_failed",
+  "modal_failed",
 ] as const;
 export type EventKind = (typeof EVENT_KINDS)[number];
 
@@ -121,6 +122,8 @@ export function eventLabel(kind: string, detail: Detail = {}): string {
       return "La corrida del bot falló";
     case "fill_failed":
       return "No pude generar juegos";
+    case "modal_failed":
+      return "No pude abrir un juego en Slack";
     default:
       return kind;
   }

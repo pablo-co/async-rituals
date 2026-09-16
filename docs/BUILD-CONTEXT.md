@@ -1,6 +1,6 @@
 # BUILD-CONTEXT — estado real de la construcción y contexto para lo que falta
 
-Última actualización: 2026-09-16 (hito 1: código completo y probado; falta la prueba real en Slack). Este archivo es el puente entre el plan
+Última actualización: 2026-09-16 (hitos 2 y 4 construidos salvo Dos verdades; Pablo pidió jugar primero los juegos de IA). Este archivo es el puente entre el plan
 (`docs/plans/async-rituals-mvp-plan.md`, escrito antes de construir) y el código real.
 **Cuando el plan y este archivo choquen en detalles de implementación (rutas, nombres, firmas), gana este archivo;
 cuando choquen en decisiones de producto, gana el plan.** Actualízalo al cerrar cada hito.
@@ -24,9 +24,9 @@ Documentos de referencia (no repetidos aquí):
 | --- | --- | --- |
 | 0 · Esqueleto en localhost | ✅ hecho | login real con Supabase Auth; 3 pantallas; `/api/health`; migración 0001 aplicada |
 | 1 · Adivina quién de punta a punta | ✅ código publicado y probado, **pendiente de prueba real en Slack** | OAuth real hecho (equipo Kublau, canal #rituales-bot, bienvenida enviada, crons corriendo); pruebas del tick y de respuestas con base falsa (`tests/tick.test.ts`, `tests/answers.test.ts`); `npm run smoke` 20/20 contra la base real; falta: ≥ 2 personas en el canal, seed de hechos, primer post y reveal |
-| 2 · Juegos de botones + IA | ⬜ | — |
+| 2 · Juegos de botones + IA | ✅ Esto o aquello + capa de IA; ⬜ Dos verdades (espera material del onboarding, hito 5) | `npm run eval` 3/3 con `claude-opus-5`; pruebas de plantilla, esquemas y fill; falta la prueba real en Slack |
 | 3 · Puntos, rachas, recap | ⬜ | — |
-| 4 · Trivia y puzzle por modal | ⬜ | — |
+| 4 · Trivia y puzzle por modal | ✅ código | `tests/play.test.ts` (modal, initial_option, errores, submit_answer antes de responder); falta la prueba real en Slack |
 | 5 · Onboarding por modal | ⬜ | — |
 | 6 · Veto, generar, pausa, DM admin, Salud | ⬜ (Salud ya se muestra en Actividad) | — |
 | 7 · stats, README/runbook, pulido escritorio | ⬜ | — |
@@ -64,6 +64,19 @@ Eventos de raicode ya disparados: `build-started`, `needs-supabase-setup`, `supa
 - La bienvenida es condición del primer post: `postGame` salta con `channel_error` si `welcomed_channel_id <> channel_id`.
 - `events.kind` es texto libre; `lib/events/labels.ts` tiene la etiqueta en español de cada kind que se escribe (prueba
   `tests/events-labels.test.ts` lo exige). Al agregar un kind nuevo: escribirlo en `EVENT_KINDS` y en `eventLabel`.
+- **Orden de construcción cambiado por Pablo (2026-09-16):** primero los juegos de IA (esto o aquello, trivia, puzzle); Adivina
+  quién y Dos verdades esperan a que él quiera cargar hechos. La rotación no cambia: `guess_who`/`two_truths` devuelven `null` sin
+  material y el slot pasa a la siguiente plantilla. `preferDifferent` (fill) mueve al final la plantilla del slot anterior para no
+  repetir dos veces seguidas cuando falta material.
+- **IA:** modelo por defecto `claude-opus-5` (`ANTHROPIC_MODEL` lo cambia); una llamada por juego con tool use, `max_tokens` 1500,
+  un reintento con el error de zod en el prompt. Sin llave: `sampleGame(type)` (`lib/ai/sample.ts`) con `is_sample = true`.
+- **Esto o aquello** guarda `quips: [paraA, paraB]` (no un solo `reveal_quip`): al revelar se publica el del lado minoritario
+  (empate → A). `answers.value = { choice: "0" | "1" }` y el ack usa `template.labelFor`.
+- **Trivia:** `answers.value = { choices: number[] }` (índice por pregunta). **Puzzle:** `answers.value = { text }`; `normalizeAnswer`
+  también quita el artículo inicial (el/la/un/una/the…).
+- El fill desde la web es asíncrono: `saveChannelAction` y `POST /api/queue/fill` (sesión) lo corren en `after()` y responden de
+  inmediato; Cola recibe `?generating=1` y `components/QueuePoller.tsx` refresca cada 4 s hasta 20 veces o hasta llenar `QUEUE_TARGET`.
+  Con `CRON_SECRET` el fill sigue siendo síncrono (para el cron y para pruebas manuales).
 
 ---
 
@@ -86,7 +99,8 @@ app/
   api/slack/install     sesión → state firmado → slack.com/oauth/v2/authorize
   api/slack/oauth/callback  state → sesión coincide → oauth.v2.access → rechazo E-1C → upsert teams → set_bot_token → resync si reconexión
   api/slack/events      url_verification sin firma; resto firmado: app_uninstalled/tokens_revoked, member_joined/left_channel (after)
-  api/slack/interactions block_actions: `answer:{game_id}` → handleAnswerSubmission (after) · `rejoin`
+  api/slack/interactions block_actions: `answer:{game_id}` → handleAnswerSubmission (after) · `play:{game_id}` → openPlayModal
+                        (await, antes del 200) · `rejoin` · view_submission → handleViewSubmission (JSON response_action)
   api/slack/commands    /rituales salir (opt-out + botón Volver a entrar) · otros → "pronto"
 components/             AppHeader, AppNav (bottom-nav móvil / tabs escritorio), ThemeToggle (useSyncExternalStore),
                         Alert (alert-inline + tono), Badge (data-tone), ListRow, EmptyState, SubmitButton (useFormStatus)
@@ -103,8 +117,18 @@ lib/
   queue/fill.ts         QUEUE_TARGET=8, QUEUE_LOW=3, pickSlotDates, futureQueue, fillTeam (rotación por índice)
   games/types.ts        GameType, GameStatus, SkipReason, GAME_LABELS, ROTATION
   games/template.ts     GameTemplate (generate/render/score/reveal/closed), contentHash, activeMembers, memberName
-  games/registry.ts     TEMPLATES (hoy solo guess_who), templateFor, availableRotation
+  games/registry.ts     TEMPLATES (guess_who, this_or_that, trivia, puzzle), templateFor, availableRotation
   games/guess-who.ts    plantilla completa (opciones al publicar; ≤6 botones o static_select)
+  games/this-or-that.ts IA; 2 botones (value "0"/"1"); labelFor; reveal "{A}: n · {B}: m." + quip minoritario en hilo
+  games/trivia.ts       IA; botón Jugar (`play:{game_id}`); score = aciertos; reveal "Respuestas: 1 … · 2 … · 3 …" + ronda perfecta
+  games/puzzle.ts       IA; botón Jugar; normalizeAnswer/isAccepted; reveal "La respuesta era: *…*." + "Lo resolvieron …"
+  ai/schemas.ts         zod: thisOrThatSchema, triviaSchema, puzzleSchema; toolInputSchema (JSON Schema draft-7 sin $schema)
+  ai/prompts.ts         SYSTEM_PROMPT + EXCLUDED_TOPICS + prompt por plantilla con la lista "temas ya usados"
+  ai/generate.ts        generateStructured (tool use + zod + 1 reintento), recentPreviews, generateThisOrThat/Trivia/Puzzle, aiModel
+  ai/sample.ts          sampleGame(type) → GeneratedGame con isSample cuando no hay llave
+  play.ts               openPlayModal (views.open antes del 200) · handleViewSubmission (submit_answer → errors | clear + postEphemeral)
+  slack/modals/trivia.ts  triviaModal (radio_buttons obligatorios, initial_option) · readTriviaSubmission
+  slack/modals/puzzle.ts  puzzleModal (plain_text_input max 80 + hint) · readPuzzleSubmission
   games/questions.ts    las 10 preguntas D-7A (QUESTIONS, QUESTION_KEYS, leadInFor, ANSWER_MAX_LENGTH=280)
   slack/strings.ts      TODOS los textos del bot + LIMITS + clampLabel
   slack/blocks.ts       header, section, context, button, answerButtons, answerSelect, actions
@@ -122,7 +146,9 @@ lib/
   db/teams.ts           findTeamBySlackId / ById / ByAdmin (service role)
   db/session.ts         requireAdmin() → { user, team: TeamRow | null } (redirige a /login)
   supabase/             client.ts (browser) · server.ts (cookies) · admin.ts (service role, server-only)
-  ai/sample-content.json  5 juegos de muestra (solo vista previa de Cola por ahora)
+  ai/sample-content.json  muestras de this_or_that/trivia/puzzle (vista previa de Cola y relleno sin llave)
+components/QueuePoller.tsx  cliente: router.refresh() cada 4 s mientras la cola se genera (?generating=1)
+evals/content.test.ts       generación en vivo (opt-in con `npm run eval`; `npm test` la salta)
 supabase/migrations/0001_init.sql   esquema v1 completo (ver §4)
 scripts/                migrate.ts · seed-facts.ts (JSON con name|slack_user_id, question_key, text) · check-anthropic.ts ·
                         smoke.ts (equipo desechable contra la base real: Vault, claim concurrente, submit_answer, sweep, ventana de reveal, RLS, vistas)
@@ -155,10 +181,10 @@ Convenciones de `games.payload` por tipo (las que existen y las que faltan deben
 - `guess_who`: `{ fact_id, featured_member_id, question_key, text, resumed? }`.
 - Todo tipo con pregunta visible debe escribir **`payload.preview`** (texto seguro para el admin antes del reveal):
   `this_or_that` (la pregunta), `trivia` (título o "3 preguntas: …"), `puzzle` (el acertijo), `recap` (opcional).
-- `this_or_that`: `{ preview, question, options: [a, b], reveal_quip }` (el quip se genera en el fill, nunca al reveal).
+- `this_or_that`: `{ preview, question, options: [a, b], quips: [paraA, paraB] }` (los quips se generan en el fill, nunca al reveal).
 - `two_truths`: `{ fact_id, featured_member_id, statements: [3], lie_index }` (sin `preview`).
-- `trivia`: `{ preview, questions: [{ q, options: [3-4], correct }] }` · `answers.value = { q1: 'b', … }` → `correct_count` al reveal.
-- `puzzle`: `{ preview, prompt, accepted_answers: [] }` · `answers.value = { text }` → comparación normalizada al reveal.
+- `trivia`: `{ preview, title, questions: [{ q, options: [3-4], correct }] }` · `answers.value = { choices: number[] }` → `correct_count` al reveal.
+- `puzzle`: `{ preview, prompt, answer, accepted_answers: [] }` · `answers.value = { text }` → comparación normalizada al reveal.
 - `recap`: `{ week_start, week_end }` (se llena al publicar con las vistas).
 
 `facts.payload`: `fact` → `{ question_key, text }` · `two_truths` → `{ statements: [3], lie_index }`.
@@ -203,7 +229,7 @@ Pendiente (hito 6): nada nuevo en esquema; `paused_until`, `material_alert_sent_
 
 ## 6. Lo que falta, hito por hito (con archivos)
 
-### Hito 1 · cierre (pendiente de Pablo + verificación)
+### Hito 1 · cierre (pospuesto por Pablo: primero los juegos de IA)
 1. ✅ Pablo conectó Slack (2026-09-16): equipo Kublau, canal #rituales-bot, cadencia 5, bienvenida enviada. **Solo hay una
    persona en el canal** (Pablo): Adivina quién necesita ≥ 2 activos (el render lanza "No hay nadie que pueda adivinar" y el
    juego se salta con `template_error`). Conectar ya avisa con `alert-warning` y esconde "Publicar el primero ahora" mientras
@@ -216,15 +242,13 @@ Pendiente (hito 6): nada nuevo en esquema; `paused_until`, `material_alert_sent_
    extender `defaultRpcs` solo si el SQL real cambia (la verdad del SQL la prueba el smoke, no la base falsa).
 
 ### Hito 2 · Juegos de botones + IA
-- `lib/games/two-truths.ts`: material de `facts` kind `two_truths` sin usar (misma reserva que guess_who); render: 3 frases
+- ✅ `this-or-that.ts`, capa de IA (`lib/ai/*`), muestras sin llave, `POST /api/queue/fill` 202 + `after()`, polling en Cola,
+  aviso sin llave en Cola y Conectar.
+- ⬜ `lib/games/two-truths.ts`: material de `facts` kind `two_truths` sin usar (misma reserva que guess_who); render: 3 frases
   numeradas + 3 botones "1", "2", "3" (`value` = índice); score: `choice === lie_index`; reveal D-1A
-  ("La mentira era: «{frase}»." · hilo "Le atinaron … (+2). {Autor} engañó a {n} (+{n}).").
-- `lib/games/this-or-that.ts`: generate con IA (`payload.preview`, `options`, `reveal_quip`); render: 2 botones; score: null;
-  reveal: "{A}: {n} · {B}: {m}." + hilo con `reveal_quip`.
-- `lib/ai/generate.ts` + `lib/ai/prompts.ts` + esquemas zod por plantilla; `evals/content.test.ts` condicionado a la llave.
-- Contenido de muestra: `fillTeam` usa `sample-content.json` (`isSample: true`) cuando no hay llave; Cola y Conectar
-  muestran el `alert-warning` de D-2D (Cola ya lo hace).
-- `POST /api/queue/fill` → `202 + after()` y polling en Cola ("Generando…", D-2B).
+  ("La mentira era: «{frase}»." · hilo "Le atinaron … (+2). {Autor} engañó a {n} (+{n}).") + `labelFor` → la frase elegida.
+  Registrarla en `TEMPLATES`; actualizar `tests/fill.test.ts` (rotación) y agregar `tests/two-truths.test.ts`.
+- ⬜ Prueba real en Slack de esto o aquello, trivia y puzzle (post, botón/modal, ack, reveal e hilo).
 
 ### Hito 3 · Puntos, rachas, recap
 - `supabase/migrations/0002_scores.sql`: vistas de puntos por juego / semana / tabla, racha vigente, `member_streaks`.
@@ -236,12 +260,10 @@ Pendiente (hito 6): nada nuevo en esquema; `paused_until`, `material_alert_sent_
 - `/rituales stats` queda para el hito 7 pero usa estas vistas.
 
 ### Hito 4 · Trivia y puzzle por modal
-- `lib/games/trivia.ts`, `lib/games/puzzle.ts` (IA); render: un botón "Jugar" (`action_id: play:{game_id}`).
-- `lib/slack/modals/{trivia,puzzle}.ts` (D-2D: títulos "Trivia"/"Puzzle", submit "Enviar", close "Cancelar", `initial_option`
-  al reabrir, `max_length` 80 en puzzle, hint literal). En `interactions`: `play:` → `views.open` antes del 200;
-  `view_submission` → `submit_answer` antes de responder; `response_action: errors` "Este juego ya cerró." o `clear` +
-  `chat.postEphemeral` "Guardado: {n} respuestas…". Extender `handleAnswerSubmission` para valores de modal.
-- Normalización del puzzle (minúsculas, sin acentos ni puntuación) en `score`.
+- ✅ Todo el código (`lib/games/{trivia,puzzle}.ts`, `lib/slack/modals/*`, `lib/play.ts`, ruta de interacciones). Los modales no
+  pasan por `handleAnswerSubmission`: tienen su propio camino en `handleViewSubmission` (mismo contrato: `submit_answer` antes de
+  responder, nunca "Guardado" sin guardar).
+- ⬜ Prueba real en Slack (ver hito 2).
 
 ### Hito 5 · Onboarding por modal
 - `lib/slack/modals/onboarding.ts` (título "Cuéntanos de ti", 10 inputs opcionales de `QUESTIONS`, bloque opcional de dos

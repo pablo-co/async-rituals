@@ -4,11 +4,14 @@ import { Alert } from "@/components/Alert";
 import { Badge } from "@/components/Badge";
 import { EmptyState } from "@/components/EmptyState";
 import { ListRow } from "@/components/ListRow";
+import { QueuePoller } from "@/components/QueuePoller";
 import sampleContent from "@/lib/ai/sample-content.json";
 import { getAdminTeam, getQueue } from "@/lib/db/queries";
 import { hasAnthropicKey } from "@/lib/env";
 import { formatSlotDate } from "@/lib/format";
 import { GAME_LABELS, type GameType } from "@/lib/games/types";
+import { QUEUE_TARGET } from "@/lib/queue/fill";
+import { strings } from "@/lib/slack/strings";
 import { createClient } from "@/lib/supabase/server";
 import { DEFAULT_TIMEZONE, localParts, nextSlotDates } from "@/lib/time";
 
@@ -16,6 +19,8 @@ export const metadata: Metadata = { title: "Cola" };
 export const dynamic = "force-dynamic";
 
 const HIDDEN_TYPES: ReadonlySet<GameType> = new Set(["guess_who", "two_truths"]);
+
+type Params = { generating?: string; saved?: string; next?: string };
 
 /** Row title: the question, or the template name when the content stays hidden until the reveal. */
 function rowTitle(type: GameType, preview: string | null): string {
@@ -30,7 +35,8 @@ function rowMeta(slotDate: string, type: GameType): string {
   return `${day} · ${GAME_LABELS[type]}`;
 }
 
-export default async function ColaPage() {
+export default async function ColaPage({ searchParams }: { searchParams: Promise<Params> }) {
+  const params = await searchParams;
   const supabase = await createClient();
   const team = await getAdminTeam(supabase);
   const anthropic = hasAnthropicKey();
@@ -80,21 +86,27 @@ export default async function ColaPage() {
 
   const today = localParts(new Date(), team.timezone).date;
   const games = await getQueue(supabase, team.id, today);
+  const pending = games.filter((g) => g.status !== "vetoed").length;
+  const generating = params.generating === "1" && pending < QUEUE_TARGET;
 
   return (
     <>
       <h1 className="font-display text-(length:--text-xl)">Cola</h1>
-      {!anthropic ? (
-        <Alert tone="warning">
-          Sin llave de Anthropic: solo se publican Adivina quién y Dos verdades. Trivia, Esto o
-          aquello y Puzzle esperan la llave.
-        </Alert>
+      <QueuePoller active={generating} />
+      {params.saved === "1" ? (
+        <Alert tone="success">Guardado. El próximo juego sale el {params.next ?? "próximo día del ritmo"} por la mañana.</Alert>
+      ) : null}
+      {!anthropic ? <Alert tone="warning">{strings.sampleWarning}</Alert> : null}
+      {generating ? (
+        <Alert tone="info">Generando los juegos de las próximas semanas… esta lista se actualiza sola.</Alert>
       ) : null}
       {games.length === 0 ? (
-        <EmptyState
-          title="Sin juegos en cola"
-          help="Se genera una semana al guardar el canal en Conectar."
-        />
+        generating ? null : (
+          <EmptyState
+            title="Sin juegos en cola"
+            help="Se genera una semana al guardar el canal en Conectar."
+          />
+        )
       ) : (
         <ul className="flex flex-col gap-2 list-none p-0 m-0">
           {games.map((game) => {
