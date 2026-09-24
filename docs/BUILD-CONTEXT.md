@@ -266,8 +266,14 @@ Pendiente (hito 6): nada nuevo en esquema; `paused_until`, `material_alert_sent_
 
 ### Hito 4 · Trivia y puzzle por modal
 - ✅ Todo el código (`lib/games/{trivia,puzzle}.ts`, `lib/slack/modals/*`, `lib/play.ts`, ruta de interacciones). Los modales no
-  pasan por `handleAnswerSubmission`: tienen su propio camino en `handleViewSubmission` (mismo contrato: `submit_answer` antes de
-  responder, nunca "Guardado" sin guardar).
+  pasan por `handleAnswerSubmission`: tienen su propio camino en `lib/play.ts`.
+- **Desviación de D-2D (2026-09-24, decidida por un fallo real):** Slack da 3 s para responder un `view_submission` y un arranque en
+  frío medido en producción tardó 2.6 s solo en llegar al handler; Alberto vio "ocurrió un error inesperado" aunque su respuesta sí
+  se guardó. Ahora `handleViewSubmission` solo valida lo que mandó Slack (sin base ni Slack) y responde `clear` al instante;
+  `saveModalAnswer` corre en `after()`: `submit_answer` y luego UN efímero con la verdad ("Guardado: …" solo si guardó; si no
+  "Este juego ya cerró." / "No estás en el ritual." / "No pude guardar…"). El caso "ya cerró" deja de ser error dentro del modal y
+  pasa a mensaje privado. `openPlayModal` hace 2 viajes a la base (juego → miembro + respuesta previa + token en paralelo).
+  Las plantillas cargan `lib/ai/generate` con `import()` dinámico: las rutas de Slack y el tick no cargan el SDK de Anthropic.
 - ⬜ Prueba real en Slack (ver hito 2).
 
 ### Hito 5 · Onboarding por modal

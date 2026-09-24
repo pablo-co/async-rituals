@@ -46,18 +46,27 @@ export function triviaModal(game: GameRow, existing?: Record<string, unknown> | 
 
 export type SubmissionRead = { value: Record<string, unknown>; ack: string } | { errors: Record<string, string> };
 
-/** view.state.values → { choices } or per-block errors. */
-export function readTriviaSubmission(game: GameRow, values: Record<string, unknown>): SubmissionRead {
-  const p = triviaPayload(game);
+/**
+ * view.state.values → { choices } or per-block errors, without touching the database (the reply to
+ * Slack must be instant). Blocks are q0…qN; a gap or an empty selection is flagged on that block.
+ * The save step checks the count against the game's questions.
+ */
+export function readTriviaSubmission(values: Record<string, unknown>): SubmissionRead {
+  const indexes = Object.keys(values)
+    .map((key) => /^q(\d+)$/.exec(key))
+    .filter((m): m is RegExpExecArray => m !== null)
+    .map((m) => Number(m[1]));
+  if (indexes.length === 0) return { errors: { q0: strings.modal.pickOne } };
+  const last = Math.max(...indexes);
   const choices: number[] = [];
   const errors: Record<string, string> = {};
-  p.questions.forEach((_q, i) => {
-    const block = values[`q${i}`] as { choice?: { selected_option?: { value?: string } } } | undefined;
+  for (let i = 0; i <= last; i += 1) {
+    const block = values[`q${i}`] as { choice?: { selected_option?: { value?: string } | null } } | undefined;
     const raw = block?.choice?.selected_option?.value;
     const n = raw === undefined ? NaN : Number(raw);
     if (!Number.isInteger(n)) errors[`q${i}`] = strings.modal.pickOne;
     else choices.push(n);
-  });
+  }
   if (Object.keys(errors).length > 0) return { errors };
   return { value: { choices }, ack: strings.trivia.ackSaved(choices.length) };
 }

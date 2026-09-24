@@ -1,4 +1,3 @@
-import { generateThisOrThat, recentPreviews } from "@/lib/ai/generate";
 import { sampleGame } from "@/lib/ai/sample";
 import type { GameRow } from "@/lib/db/types";
 import { hasAnthropicKey } from "@/lib/env";
@@ -41,6 +40,8 @@ export const thisOrThat: GameTemplate = {
 
   async generate(ctx) {
     if (!hasAnthropicKey()) return sampleGame("this_or_that");
+    // Lazy: the tick and the Slack routes load this template too, and must not pay for the AI SDK.
+    const { generateThisOrThat, recentPreviews } = await import("@/lib/ai/generate");
     const used = await recentPreviews(ctx.db, ctx.team.id, "this_or_that");
     const content = await generateThisOrThat(used);
     const payload: ThisOrThatPayload = {

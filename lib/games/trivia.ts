@@ -1,4 +1,3 @@
-import { generateTrivia, recentPreviews } from "@/lib/ai/generate";
 import { sampleGame } from "@/lib/ai/sample";
 import type { GameRow } from "@/lib/db/types";
 import { hasAnthropicKey } from "@/lib/env";
@@ -38,6 +37,8 @@ export const trivia: GameTemplate = {
 
   async generate(ctx) {
     if (!hasAnthropicKey()) return sampleGame("trivia");
+    // Lazy: the tick and the Slack routes load this template too, and must not pay for the AI SDK.
+    const { generateTrivia, recentPreviews } = await import("@/lib/ai/generate");
     const used = await recentPreviews(ctx.db, ctx.team.id, "trivia");
     const content = await generateTrivia(used);
     const payload: TriviaPayload = { preview: content.title, title: content.title, questions: content.questions };

@@ -31,7 +31,7 @@ interface InteractionPayload {
  * Interactivity, three shapes:
  *   answer:{game_id}[:i] → empty 200 now, handleAnswerSubmission inside after(), reply via response_url
  *   play:{game_id}    → views.open BEFORE the 200 (trigger_id lives 3 s), then empty 200
- *   view_submission   → submit_answer synchronously, JSON response_action; the ephemeral ack runs in after()
+ *   view_submission   → local checks only, `clear` at once; submit_answer + the private ack run in after()
  */
 export const POST = withSlackRequest(async (req) => {
   if (req.kind !== "interaction") return;
@@ -43,7 +43,7 @@ export const POST = withSlackRequest(async (req) => {
     const view = p.view;
     if (!view?.callback_id) return;
     const db = createAdminClient();
-    const response = await handleViewSubmission(
+    const response = handleViewSubmission(
       db,
       {
         callbackId: view.callback_id,

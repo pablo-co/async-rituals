@@ -135,76 +135,128 @@ describe("openPlayModal", () => {
   });
 });
 
-describe("handleViewSubmission", () => {
-  it("saves the trivia choices, clears the modal and schedules the private ack", async () => {
+describe("handleViewSubmission (instant half)", () => {
+  const triviaValues = { q0: radio("1"), q1: radio("0"), q2: radio("1") };
+
+  it("answers clear without touching the database or Slack, and schedules the save", () => {
     const { db, slack, slackFor } = setup();
-    const response = await handleViewSubmission(
+    const from = vi.spyOn(db, "from");
+    const rpc = vi.spyOn(db, "rpc");
+    const response = handleViewSubmission(
       db.client(),
-      { callbackId: "trivia", slackUserId: "Um1", privateMetadata: meta("gt"), values: { q0: radio("1"), q1: radio("0"), q2: radio("1") } },
+      { callbackId: "trivia", slackUserId: "Um1", privateMetadata: meta("gt"), values: triviaValues },
       schedule,
       slackFor,
     );
     expect(response).toEqual({ response_action: "clear" });
-    expect(db.table("answers")[0]).toMatchObject({ game_id: "gt", member_id: "m1", value: { choices: [1, 0, 1] } });
+    expect(from).not.toHaveBeenCalled();
+    expect(rpc).not.toHaveBeenCalled();
+    expect(slack.calls).toHaveLength(0);
     expect(scheduled).toHaveLength(1);
-    await scheduled[0]();
-    expect(slack.postEphemeral).toHaveBeenCalledWith({ channel: "C1", user: "Um1", text: strings.trivia.ackSaved(3) });
   });
 
-  it("returns a block error when a question is missing and saves nothing", async () => {
+  it("flags a missing question on its own block and schedules nothing", () => {
     const { db, slackFor } = setup();
-    const response = await handleViewSubmission(
+    const response = handleViewSubmission(
       db.client(),
       { callbackId: "trivia", slackUserId: "Um1", privateMetadata: meta("gt"), values: { q0: radio("1"), q2: radio("1") } },
       schedule,
       slackFor,
     );
     expect(response).toEqual({ response_action: "errors", errors: { q1: strings.modal.pickOne } });
-    expect(db.table("answers")).toHaveLength(0);
     expect(scheduled).toHaveLength(0);
   });
 
-  it("says 'ya cerró' in the modal when submit_answer refuses (the tick moved on) and never claims Guardado", async () => {
+  it("asks for an answer when the puzzle text is blank", () => {
     const { db, slackFor } = setup();
-    db.find("games", "gt").status = "revealing";
-    const response = await handleViewSubmission(
+    const response = handleViewSubmission(
       db.client(),
-      { callbackId: "trivia", slackUserId: "Um1", privateMetadata: meta("gt"), values: { q0: radio("1"), q1: radio("0"), q2: radio("1") } },
+      { callbackId: "puzzle", slackUserId: "Um1", privateMetadata: meta("gp"), values: { answer: { text: { value: "   " } } } },
       schedule,
       slackFor,
     );
-    expect(response).toEqual({ response_action: "errors", errors: { q0: strings.closed } });
-    expect(scheduled).toHaveLength(0);
+    expect(response).toEqual({ response_action: "errors", errors: { answer: strings.modal.emptyAnswer } });
   });
 
-  it("handles the puzzle: empty answer is an error, a real one is saved and acknowledged", async () => {
-    const { db, slack, slackFor } = setup();
-    const submit = (text: string) =>
-      handleViewSubmission(
-        db.client(),
-        { callbackId: "puzzle", slackUserId: "Um1", privateMetadata: meta("gp"), values: { answer: { text: { value: text } } } },
-        schedule,
-        slackFor,
-      );
-    expect(await submit("   ")).toEqual({ response_action: "errors", errors: { answer: strings.modal.emptyAnswer } });
-    expect(await submit("  El reloj ")).toEqual({ response_action: "clear" });
-    expect(db.table("answers")[0]).toMatchObject({ game_id: "gp", value: { text: "El reloj" } });
-    await scheduled[0]();
-    expect(slack.postEphemeral).toHaveBeenCalledWith({ channel: "C1", user: "Um1", text: strings.puzzle.ackSaved("El reloj") });
-  });
-
-  it("rejects people outside the ritual, unknown callbacks and broken metadata", async () => {
+  it("ignores callbacks that are not games and refuses broken metadata", () => {
     const { db, slackFor } = setup();
-    const values = { q0: radio("1"), q1: radio("0"), q2: radio("1") };
-    expect(await handleViewSubmission(db.client(), { callbackId: "trivia", slackUserId: "Um2", privateMetadata: meta("gt"), values }, schedule, slackFor)).toEqual({
-      response_action: "errors",
-      errors: { q0: strings.notMember },
-    });
-    expect(await handleViewSubmission(db.client(), { callbackId: "onboarding", slackUserId: "Um1", privateMetadata: meta("gt"), values }, schedule, slackFor)).toBeNull();
-    expect(await handleViewSubmission(db.client(), { callbackId: "trivia", slackUserId: "Um1", privateMetadata: "{oops", values }, schedule, slackFor)).toEqual({
+    const args = { slackUserId: "Um1", values: triviaValues };
+    expect(handleViewSubmission(db.client(), { ...args, callbackId: "onboarding", privateMetadata: meta("gt") }, schedule, slackFor)).toBeNull();
+    expect(handleViewSubmission(db.client(), { ...args, callbackId: "trivia", privateMetadata: "{oops" }, schedule, slackFor)).toEqual({
       response_action: "errors",
       errors: { q0: strings.closed },
     });
+    expect(scheduled).toHaveLength(0);
+  });
+});
+
+describe("saveModalAnswer (after the reply)", () => {
+  async function submitAndSave(db: FakeDb, slackFor: () => Promise<unknown>, callbackId: string, gameId: string, user: string, values: Record<string, unknown>) {
+    const response = handleViewSubmission(
+      db.client(),
+      { callbackId, slackUserId: user, privateMetadata: meta(gameId), values },
+      schedule,
+      slackFor as never,
+    );
+    expect(response).toEqual({ response_action: "clear" });
+    await scheduled.at(-1)!();
+  }
+  const triviaValues = { q0: radio("1"), q1: radio("0"), q2: radio("1") };
+
+  it("saves the trivia choices, then confirms privately with the count", async () => {
+    const { db, slack, slackFor } = setup();
+    await submitAndSave(db, slackFor, "trivia", "gt", "Um1", triviaValues);
+    expect(db.table("answers")[0]).toMatchObject({ game_id: "gt", member_id: "m1", value: { choices: [1, 0, 1] } });
+    expect(slack.postEphemeral).toHaveBeenCalledWith({ channel: "C1", user: "Um1", text: strings.trivia.ackSaved(3) });
+  });
+
+  it("saves the puzzle text trimmed and confirms it", async () => {
+    const { db, slack, slackFor } = setup();
+    await submitAndSave(db, slackFor, "puzzle", "gp", "Um1", { answer: { text: { value: "  El reloj " } } });
+    expect(db.table("answers")[0]).toMatchObject({ game_id: "gp", value: { text: "El reloj" } });
+    expect(slack.postEphemeral).toHaveBeenCalledWith({ channel: "C1", user: "Um1", text: strings.puzzle.ackSaved("El reloj") });
+  });
+
+  it("never says Guardado when the game already closed", async () => {
+    const { db, slack, slackFor } = setup();
+    db.find("games", "gt").status = "revealing";
+    await submitAndSave(db, slackFor, "trivia", "gt", "Um1", triviaValues);
     expect(db.table("answers")).toHaveLength(0);
+    expect(slack.postEphemeral).toHaveBeenCalledWith({ channel: "C1", user: "Um1", text: strings.closed });
+  });
+
+  it("tells people outside the ritual, and opted-out people, without saving", async () => {
+    const { db, slack, slackFor } = setup();
+    await submitAndSave(db, slackFor, "trivia", "gt", "Um3", triviaValues);
+    expect(slack.postEphemeral).toHaveBeenLastCalledWith({ channel: "C1", user: "Um3", text: strings.notMember });
+    await submitAndSave(db, slackFor, "trivia", "gt", "Um2", triviaValues);
+    expect(slack.postEphemeral).toHaveBeenLastCalledWith({ channel: "C1", user: "Um2", text: strings.optedOut });
+    expect(db.table("answers")).toHaveLength(0);
+  });
+
+  it("reports a database failure honestly and logs answer_failed", async () => {
+    const { db, slack, slackFor } = setup();
+    db.rpcs.submit_answer = () => {
+      throw new Error("deadlock detected");
+    };
+    await submitAndSave(db, slackFor, "trivia", "gt", "Um1", triviaValues);
+    expect(slack.postEphemeral).toHaveBeenCalledWith({ channel: "C1", user: "Um1", text: strings.saveFailed });
+    expect(db.events("answer_failed")).toHaveLength(1);
+  });
+
+  it("refuses a trivia answer with the wrong number of questions", async () => {
+    const { db, slack, slackFor } = setup();
+    await submitAndSave(db, slackFor, "trivia", "gt", "Um1", { q0: radio("1"), q1: radio("0") });
+    expect(db.table("answers")).toHaveLength(0);
+    expect(slack.postEphemeral).toHaveBeenCalledWith({ channel: "C1", user: "Um1", text: strings.saveFailed });
+    expect(db.events("answer_failed")[0].detail).toMatchObject({ message: "choices_mismatch" });
+  });
+
+  it("keeps the saved answer and logs ack_failed when the private message fails", async () => {
+    const { db, slack, slackFor } = setup();
+    slack.postEphemeral.mockRejectedValueOnce(new Error("user_not_in_channel"));
+    await submitAndSave(db, slackFor, "trivia", "gt", "Um1", triviaValues);
+    expect(db.table("answers")).toHaveLength(1);
+    expect(db.events("ack_failed")).toHaveLength(1);
   });
 });
