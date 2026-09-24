@@ -21,8 +21,8 @@ describe("this or that", () => {
     expect(blockTypes(post.blocks)).toEqual(["header", "section", "actions", "context"]);
     const actions = post.blocks[2] as { elements: { text: { text: string }; value: string; action_id: string }[] };
     expect(actions.elements.map((e) => [e.text.text, e.value, e.action_id])).toEqual([
-      ["Café", "0", "answer:g1"],
-      ["Té", "1", "answer:g1"],
+      ["Café", "0", "answer:g1:0"],
+      ["Té", "1", "answer:g1:1"],
     ]);
     expect(JSON.stringify(post.blocks[1])).toContain("&lt;b&gt;");
   });

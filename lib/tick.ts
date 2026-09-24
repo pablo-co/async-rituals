@@ -17,6 +17,7 @@ import { describeSlackError, mapSlackError } from "@/lib/slack/errors";
  *                              │ template error ──▶ skipped(template_error | featured_inactive)         │ 0 answers ──▶ skipped(no_answers)
  *                              │ channel error  ──▶ skipped(channel_error) + teams.channel_error_at      │ Slack down ──▶ stays revealing, retried
  *                              │ disconnected   ──▶ back to queued + teams.disconnected_at
+ *                              │ Slack rejects  ──▶ skipped(template_error) with Slack's reason (it certainly did not post)
  *                              └ Slack down     ──▶ stays posting; reclaimed by the next sweep (E-1B)
  *
  * Order per team: sweep → reveal → post → refill (if the queue is low) → last_tick_at.
@@ -135,6 +136,11 @@ export async function postGame(
       await logEvent(db, { teamId: team.id, runId: run?.id, kind: "disconnected", detail: info });
       return "deferred";
     }
+    if (failure === "rejected") {
+      await logEvent(db, { teamId: team.id, runId: run?.id, kind: "post_failed", gameId: game.id, detail: info });
+      await markSkipped(db, run, game, "template_error", info);
+      return "skipped";
+    }
     if (failure === "channel") {
       await markSkipped(db, run, game, "channel_error", info);
       if (!team.channel_error_at) {
@@ -213,6 +219,11 @@ export async function revealGame(
       return "deferred";
     }
     await logEvent(db, { teamId: team.id, runId: run?.id, kind: "reveal_failed", gameId: game.id, detail: info });
+    if (failure === "rejected") {
+      // Retrying the same content would fail every hour forever; clicks on the old post already answer "ya cerró".
+      await markSkipped(db, run, game, "template_error", info);
+      return "skipped";
+    }
     return "deferred"; // stays revealing; reclaimed after 15 min
   }
 

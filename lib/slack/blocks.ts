@@ -35,13 +35,22 @@ export function button(actionId: string, label: string, value: string, style?: "
   };
 }
 
-/** Up to 6 answer buttons (D-1A). Every button shares the action_id; the value is the choice. */
+/**
+ * Up to 6 answer buttons (D-1A). Slack rejects the whole message (`invalid_blocks`) when two elements
+ * of one block share an action_id, so each button gets `{actionId}:{index}`; the value is the choice.
+ */
 export function answerButtons(blockId: string, actionId: string, options: Option[]): ActionsBlock {
   return {
     type: "actions",
     block_id: blockId,
-    elements: options.slice(0, LIMITS.actions).map((o) => button(actionId, o.label, o.value)),
+    elements: options.slice(0, LIMITS.actions).map((o, i) => button(`${actionId}:${i}`, o.label, o.value)),
   };
+}
+
+/** Game id from an answer action: `answer:{game_id}` (select) or `answer:{game_id}:{index}` (button). */
+export function answerGameId(actionId: string): string | null {
+  const [prefix, gameId] = actionId.split(":");
+  return prefix === "answer" && gameId ? gameId : null;
 }
 
 /** More than 6 options: one static_select instead of a wall of buttons. */

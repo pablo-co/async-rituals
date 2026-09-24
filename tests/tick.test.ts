@@ -28,7 +28,10 @@ function setup(overrides: { team?: Partial<TeamRow>; game?: Partial<GameRow> | n
     games: overrides.game === null ? [] : [game(overrides.game)],
   });
   const slack = fakeSlack();
-  const deps = (now: Date): TickDeps => ({ db: db.client(), now, slackFor: async () => slack.client });
+  const deps = (now: Date): TickDeps => {
+    db.clock = () => now;
+    return { db: db.client(), now, slackFor: async () => slack.client };
+  };
   const run = startRun("tick", POST_TIME);
   const currentTeam = () => db.find<TeamRow>("teams", "t1");
   return { db, slack, deps, run, currentTeam };
@@ -136,6 +139,20 @@ describe("postGame", () => {
     expect(slack.postMessage).toHaveBeenCalledTimes(1);
   });
 
+  it("skips a post Slack refused (invalid_blocks) right away, with Slack's reason, instead of 'no sé si llegó'", async () => {
+    const { db, slack, deps, run, currentTeam } = setup({ game: { status: "posting" } });
+    const refused = Object.assign(slackPlatformError("invalid_blocks"), {
+      data: { error: "invalid_blocks", response_metadata: { messages: ['[ERROR] `action_id` "answer:g1" already exists'] } },
+    });
+    slack.postMessage.mockRejectedValueOnce(refused);
+    expect(await postGame(deps(POST_TIME), run, currentTeam(), db.find<GameRow>("games", "g1"))).toBe("skipped");
+    expect(db.find("games", "g1")).toMatchObject({ status: "skipped", skip_reason: "template_error" });
+    expect(db.events("post_failed")[0].detail).toMatchObject({ code: "invalid_blocks" });
+    expect(String((db.events("skipped")[0].detail as { message: string }).message)).toContain("already exists");
+    expect(currentTeam().channel_error_at).toBeNull();
+    expect(currentTeam().disconnected_at).toBeNull();
+  });
+
   it("clears channel_error_at after a successful post", async () => {
     const { db, deps, run, currentTeam } = setup({ team: { channel_error_at: "2026-09-15T00:00:00Z" }, game: { status: "posting" } });
     await postGame(deps(POST_TIME), run, currentTeam(), db.find<GameRow>("games", "g1"));
@@ -181,6 +198,15 @@ describe("revealGame", () => {
     expect(blockTypes(slack.calls[0].args.blocks)).toEqual(["header", "section"]);
     expect(JSON.stringify(slack.calls[0].args.blocks)).toContain("Este juego cerró.");
     expect(slack.postMessage).not.toHaveBeenCalled();
+  });
+
+  it("stops retrying a reveal Slack refuses", async () => {
+    const { db, slack, deps, run, currentTeam } = setup({ game: postedGame() });
+    db.add("answers", answer("a1", "g1", "m2", "m1"));
+    slack.update.mockRejectedValueOnce(slackPlatformError("invalid_blocks"));
+    expect(await revealGame(deps(REVEAL_TIME), run, currentTeam(), db.find<GameRow>("games", "g1"))).toBe("skipped");
+    expect(db.find("games", "g1")).toMatchObject({ status: "skipped", skip_reason: "template_error" });
+    expect(db.events("reveal_failed")).toHaveLength(1);
   });
 
   it("stays in revealing when Slack fails transiently", async () => {
@@ -277,6 +303,7 @@ describe("runTick", () => {
       games: [game({ status: "queued" }), game({ id: "g2", team_id: "t2", status: "queued", payload: { fact_id: "fx", featured_member_id: "x1", question_key: "first_job", text: "pintar casas" } })],
     });
     const slack = fakeSlack();
+    db.clock = () => POST_TIME;
     const run = await runTick({
       db: db.client(),
       now: POST_TIME,

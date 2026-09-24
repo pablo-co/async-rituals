@@ -1,6 +1,6 @@
 import { ErrorCode } from "@slack/web-api";
 import { describe, expect, it } from "vitest";
-import { mapSlackError, slackErrorCode } from "@/lib/slack/errors";
+import { describeSlackError, mapSlackError, slackErrorCode } from "@/lib/slack/errors";
 
 const platform = (error: string) => Object.assign(new Error(error), { code: ErrorCode.PlatformError, data: { error } });
 
@@ -20,9 +20,21 @@ describe("mapSlackError", () => {
     expect(mapSlackError(Object.assign(new Error("boom"), { code: ErrorCode.HTTPError }))).toBe("transient");
     expect(mapSlackError(platform("internal_error"))).toBe("transient");
   });
-  it("leaves the rest as other", () => {
+  it("maps any other Slack refusal to rejected, and non-Slack errors to other", () => {
+    expect(mapSlackError(platform("invalid_blocks"))).toBe("rejected");
+    expect(mapSlackError(platform("msg_too_long"))).toBe("rejected");
     expect(mapSlackError(new Error("bug propio"))).toBe("other");
-    expect(mapSlackError(platform("invalid_blocks"))).toBe("other");
     expect(slackErrorCode(null)).toBeNull();
+  });
+});
+
+describe("describeSlackError", () => {
+  it("keeps Slack's validation messages so the events log says what was wrong", () => {
+    const error = Object.assign(platform("invalid_blocks"), {
+      data: { error: "invalid_blocks", response_metadata: { messages: ['[ERROR] `action_id` "answer:x" already exists'] } },
+    });
+    const info = describeSlackError(error);
+    expect(info.code).toBe("invalid_blocks");
+    expect(info.message).toContain("already exists");
   });
 });

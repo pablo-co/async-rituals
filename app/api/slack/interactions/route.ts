@@ -1,6 +1,7 @@
 import { after } from "next/server";
 import { handleAnswerSubmission } from "@/lib/answers";
 import { findTeamBySlackId } from "@/lib/db/teams";
+import { answerGameId } from "@/lib/slack/blocks";
 import { logEvent } from "@/lib/events";
 import { handleViewSubmission, openPlayModal } from "@/lib/play";
 import { getSlackClient } from "@/lib/slack/client";
@@ -28,7 +29,7 @@ interface InteractionPayload {
 
 /**
  * Interactivity, three shapes:
- *   answer:{game_id}  → empty 200 now, handleAnswerSubmission inside after(), reply via response_url
+ *   answer:{game_id}[:i] → empty 200 now, handleAnswerSubmission inside after(), reply via response_url
  *   play:{game_id}    → views.open BEFORE the 200 (trigger_id lives 3 s), then empty 200
  *   view_submission   → submit_answer synchronously, JSON response_action; the ephemeral ack runs in after()
  */
@@ -64,9 +65,9 @@ export const POST = withSlackRequest(async (req) => {
   if (!action || !responseUrl) return;
 
   if (actionId.startsWith("answer:")) {
-    const gameId = actionId.slice("answer:".length);
+    const gameId = answerGameId(actionId);
     const choice = action.selected_option?.value ?? action.value;
-    if (!choice) return;
+    if (!gameId || !choice) return;
     after(() => handleAnswerSubmission(createAdminClient(), { gameId, slackUserId, choice, responseUrl }));
     return;
   }

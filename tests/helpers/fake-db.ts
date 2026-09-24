@@ -51,6 +51,11 @@ export class FakeDb {
   rpcs: Record<string, FakeRpc>;
   /** Every write, in order, so tests can assert "X happened before Y". */
   writes: { table: string; op: "update" | "insert" | "delete"; values?: unknown; at: number }[] = [];
+  /**
+   * The database's now(): stamps created_at / updated_at like the real triggers do. Tests that inject
+   * a time into the code under test must set it too, or "stale after 15 min" checks depend on the calendar.
+   */
+  clock: () => Date = () => new Date();
   private seq = 0;
 
   constructor(seed: Record<string, object[]> = {}, rpcs: Record<string, FakeRpc> = defaultRpcs) {
@@ -248,7 +253,7 @@ class FakeQuery implements PromiseLike<Result> {
   private run(): Result {
     const rows = this.db.table(this.tableName);
     const matched = rows.filter((r) => this.matches(r));
-    const nowIso = new Date().toISOString();
+    const nowIso = this.db.clock().toISOString();
 
     if (this.op === "select") {
       let out = matched.map((r) => this.project(r));
@@ -421,7 +426,7 @@ export const defaultRpcs: Record<string, FakeRpc> = {
     const game = db.table("games").find((g) => g.id === p_game_id);
     if (!game || game.status !== "posted") return false;
     const existing = db.table("answers").find((a) => a.game_id === p_game_id && a.member_id === p_member_id);
-    const nowIso = new Date().toISOString();
+    const nowIso = db.clock().toISOString();
     if (existing) Object.assign(existing, { value: p_value, updated_at: nowIso });
     else
       db.table("answers").push({

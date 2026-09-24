@@ -207,7 +207,12 @@ Pendiente (hito 6): nada nuevo en esquema; `paused_until`, `material_alert_sent_
   `score()` devuelve `correct_count` por respuesta; los puntos se calculan en SQL (hito 3) a partir de `correct_count`,
   `payload` y `featured_member_id`, no en TypeScript.
 - **Slack**: todo request entra por `withSlackRequest`; toda respuesta a un botón por `handleAnswerSubmission`; toda
-  llamada usa `getSlackClient` (token de Vault); todo error de Slack pasa por `mapSlackError`. Nunca `<@U…>` ni `@channel`;
+  llamada usa `getSlackClient` (token de Vault); todo error de Slack pasa por `mapSlackError`.
+  **`action_id` único por elemento dentro de un bloque** (si no, Slack rechaza el mensaje entero con `invalid_blocks`; así se
+  saltaron los dos "Esto o aquello" del 16 y 23 de septiembre): `answerButtons` usa `answer:{game_id}:{i}` y `answerGameId`
+  lo lee; `tests/blocks.test.ts` lo exige para toda plantilla registrada. `mapSlackError` distingue `rejected` (Slack contestó
+  ok:false: seguro que no publicó → `skipped(template_error)` con el mensaje de validación de Slack en `detail`) de `transient`
+  (puede haber llegado → nunca se re-publica). `tests/helpers/fake-db.ts` tiene `db.clock`: toda prueba que inyecte `now` debe fijarlo. Nunca `<@U…>` ni `@channel`;
   nombres planos desde `display_name` escapados con `escapeSlackText`. Un emoji máximo por mensaje (excepción: puzzle de emojis).
   Modales (hito 4/5): `views.open` **antes** del 200, `private_metadata` con `game_id` y `channel_id`; en `view_submission`
   la escritura va antes de responder (`response_action: errors | clear`) y la confirmación por `chat.postEphemeral`.
