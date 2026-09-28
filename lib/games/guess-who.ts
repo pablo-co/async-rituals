@@ -3,6 +3,7 @@ import type { AnswerRow, GameRow, MemberRow } from "@/lib/db/types";
 import { answerButtons, answerSelect, context, header, section } from "@/lib/slack/blocks";
 import { clampLabel, LIMITS, strings } from "@/lib/slack/strings";
 import { escapeSlackText } from "@/lib/slack/text";
+import { pickFreshFact } from "./material";
 import { leadInFor } from "./questions";
 import { activeMembers, contentHash, memberName, type GameTemplate, type RevealInput } from "./template";
 
@@ -38,47 +39,8 @@ export const guessWho: GameTemplate = {
   type: "guess_who",
 
   async generate(ctx) {
-    const { db, team } = ctx;
-    // Facts reserved by games still in the queue (a veto frees the fact by itself).
-    const { data: reservedRows, error: reservedError } = await db
-      .from("games")
-      .select("payload")
-      .eq("team_id", team.id)
-      .eq("type", "guess_who")
-      .in("status", ["queued", "posting"]);
-    if (reservedError) throw new TemplateError(reservedError.message, "template_error");
-    const reserved = new Set(
-      (reservedRows ?? []).map((r) => (r.payload as { fact_id?: string }).fact_id).filter(Boolean),
-    );
-
-    const { data: facts, error } = await db
-      .from("facts")
-      .select("id, member_id, payload, created_at, members!inner(team_id, left_at, opted_out)")
-      .eq("kind", "fact")
-      .is("used_at", null)
-      .eq("retired", false)
-      .eq("members.team_id", team.id)
-      .is("members.left_at", null)
-      .eq("members.opted_out", false)
-      .order("created_at");
-    if (error) throw new TemplateError(error.message, "template_error");
-
-    const candidates = (facts ?? []).filter((f) => !reserved.has(f.id));
-    if (candidates.length === 0) return null;
-
-    // Spread the spotlight: prefer members who have the fewest reserved facts.
-    const reservedByMember = new Map<string, number>();
-    for (const row of reservedRows ?? []) {
-      const id = (row.payload as { featured_member_id?: string }).featured_member_id;
-      if (id) reservedByMember.set(id, (reservedByMember.get(id) ?? 0) + 1);
-    }
-    candidates.sort(
-      (a, b) => (reservedByMember.get(a.member_id) ?? 0) - (reservedByMember.get(b.member_id) ?? 0),
-    );
-    const least = reservedByMember.get(candidates[0].member_id) ?? 0;
-    const pool = candidates.filter((c) => (reservedByMember.get(c.member_id) ?? 0) === least);
-    const fact = pool[Math.floor(Math.random() * pool.length)];
-
+    const fact = await pickFreshFact(ctx, "fact", "guess_who");
+    if (!fact) return null;
     const payload = fact.payload as { question_key?: string; text?: string };
     const text = String(payload.text ?? "").trim();
     if (!text) return null;

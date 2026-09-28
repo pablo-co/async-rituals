@@ -10,6 +10,10 @@ const ctx = { db: {} as never, team: {} as never, now: new Date("2026-09-16T16:0
 /** One realistic game per template, so every renderer goes through the same Slack rules. */
 const GAMES: Partial<Record<GameType, Partial<GameRow>>> = {
   guess_who: { type: "guess_who" },
+  two_truths: {
+    type: "two_truths",
+    payload: { fact_id: "f1", featured_member_id: "m1", statements: ["a", "b", "c"], lie_index: 1 },
+  },
   this_or_that: {
     type: "this_or_that",
     payload: { preview: "¿Café o té?", question: "¿Café o té?", options: ["Café", "Té"], quips: ["a", "b"] },

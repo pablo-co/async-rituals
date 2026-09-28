@@ -58,6 +58,8 @@ export interface RecentGame {
 export interface AdminActivity {
   members: number;
   onboarded: number;
+  /** Active members invited to onboarding (or who already answered). 0 until the first DM goes out. */
+  invited: number;
   played_this_week: number;
   games_published: number;
   next_slot_date: string | null;
@@ -66,7 +68,7 @@ export interface AdminActivity {
   recent_events: Pick<EventAdmin, "id" | "kind" | "detail" | "created_at">[];
 }
 
-/** Full rows (service role only). Mirrors supabase/migrations/0001_init.sql. */
+/** Full rows (service role only). Mirrors supabase/migrations/0001_init.sql (+ 0003: onboarding_invited_at). */
 export interface TeamRow extends TeamAdmin {
   admin_user_id: string;
   bot_token_secret_id: string | null;
@@ -79,6 +81,7 @@ export interface MemberRow {
   slack_user_id: string;
   display_name: string;
   onboarding_done: boolean;
+  onboarding_invited_at: string | null;
   opted_out: boolean;
   left_at: string | null;
   created_at: string;

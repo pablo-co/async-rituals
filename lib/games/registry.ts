@@ -5,15 +5,17 @@ import { recap } from "./recap";
 import type { GameTemplate } from "./template";
 import { thisOrThat } from "./this-or-that";
 import { trivia } from "./trivia";
+import { twoTruths } from "./two-truths";
 import { ROTATION, type GameType } from "./types";
 
 /**
- * Templates that exist today. `two_truths` arrives with the onboarding material (hito 5); the fill only uses
- * what is here. `recap` is registered so the tick can post it, but it is not in ROTATION (ensureRecaps queues it).
+ * Every template. The fact-based ones (guess_who, two_truths) return null without material and the slot takes the
+ * next one in the rotation. `recap` is registered so the tick can post it, but it is not in ROTATION (ensureRecaps).
  */
 export const TEMPLATES: Partial<Record<GameType, GameTemplate>> = {
   guess_who: guessWho,
   this_or_that: thisOrThat,
+  two_truths: twoTruths,
   trivia,
   puzzle,
   recap,

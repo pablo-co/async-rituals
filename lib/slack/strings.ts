@@ -25,7 +25,8 @@ export const strings = {
   rejoinButton: "Volver a entrar",
   rejoined: "Listo, ya estás de vuelta en el ritual.",
   left: "Listo, ya no te incluyo. Cuando quieras volver:",
-  commandSoon: "Ese comando llega pronto. Por ahora: /rituales salir.",
+  commandSoon: "Ese comando llega pronto.",
+  help: "Comandos: /rituales hecho (un dato tuyo para adivinar) · /rituales salir · /rituales borrar-mis-datos.",
   saveFailed: "No pude guardar tu respuesta. Inténtalo de nuevo.",
   modalFailed: "No pude abrir el juego. Toca Jugar otra vez.",
   /** Slack gives 3 s to open a modal; a cold server can miss it. The second tap lands on a warm one. */
@@ -49,6 +50,12 @@ export const strings = {
     fooled: (name: string, fooled: number, bonus: number) =>
       fooled === 0 ? `${name} no engañó a nadie esta vez.` : `${name} engañó a ${fooled} (+${bonus}).`,
     ask: (name: string) => `${name}, ¿nos cuentas?`,
+  },
+
+  twoTruths: {
+    intro: (name: string) => `${name} nos cuenta tres cosas. Una es mentira: ¿cuál?`,
+    statements: (statements: readonly string[]) => statements.map((st, i) => `*${i + 1}.* ${st}`).join("\n"),
+    revealLine: (lie: string) => `La mentira era: «${lie}».`,
   },
 
   thisOrThat: {
@@ -88,6 +95,51 @@ export const strings = {
       `*Puntos de la semana:* ${rows.map((r) => `${r.name} ${r.points}`).join(" · ")}.`,
     played: (played: number, members: number) => `${played} de ${members} jugaron esta semana.`,
     fallback: (played: number, members: number) => `Recap de la semana: ${played} de ${members} jugaron.`,
+  },
+
+  /** Onboarding by DM (D-7A, design doc "Onboarding por DM"). Modal title ≤ 24. */
+  onboarding: {
+    invite: (channel: string | null) =>
+      `Hola, soy Rituales, el bot de juegos${channel ? ` de #${channel}` : ""}. ` +
+      "¿Me cuentas unos datos curiosos sobre ti para los juegos de adivinar? Todo es opcional y toma un par de minutos.",
+    inviteButton: "Contestar",
+    answered: "Gracias, ya tengo tus respuestas para los próximos juegos. Si quieres cambiar algo, toca el botón.",
+    changeButton: "Cambiar mis respuestas",
+    slow: "Me tardé en abrir las preguntas. Toca el botón otra vez.",
+    saveFailed: "No pude guardar tus respuestas. Toca Contestar otra vez.",
+    title: "Cuéntanos de ti",
+    consent:
+      "Tus respuestas se usan solo para juegos con tu equipo. Puedes borrarlas cuando quieras con /rituales borrar-mis-datos.",
+    hint: "Corto, como para completar la frase",
+    freeHint: "En tercera persona: «corrió un maratón en 2019»",
+    twoTruthsTitle: "*2 verdades, 1 mentira* (opcional)",
+    twoTruthsHelp: "Dos cosas ciertas y una falsa sobre ti. El equipo adivina cuál es la mentira.",
+    statement: (n: number) => `Frase ${n}`,
+    lieLabel: "¿Cuál es la mentira?",
+    lieOption: (n: number) => `La ${n}`,
+    twoTruthsIncomplete: "Escribe las 3 frases y marca cuál es la mentira, o deja las tres vacías.",
+    nothing: "Contesta al menos una pregunta, o cierra la ventana si prefieres no hacerlo.",
+  },
+
+  /** `/rituales hecho` (plan CEO 6). */
+  fact: {
+    title: "Un hecho nuevo",
+    label: "Algo que quieras que adivinen",
+    hint: "En tercera persona, como para que adivinen: «corrió un maratón en 2019».",
+    empty: "Escribe tu hecho",
+    saved: "Guardado. Puede salir en un próximo Adivina quién.",
+    saveFailed: "No pude guardar, inténtalo de nuevo con /rituales hecho.",
+    slow: "Me tardé en abrir la ventana. Toca el botón para escribir tu hecho.",
+    openButton: "Escribir un hecho",
+  },
+
+  /** `/rituales borrar-mis-datos` (D-2D): the deletion happens only on the danger button. */
+  erase: {
+    confirm: "Se borrarán tu perfil, tus hechos, tus respuestas y tus puntos en Rituales. No se puede deshacer.",
+    yes: "Sí, borrar",
+    cancel: "Cancelar",
+    done: "Listo. Borré tus datos. Si vuelves a jugar, empiezas de cero.",
+    failed: "No pude borrar tus datos. Inténtalo de nuevo con /rituales borrar-mis-datos.",
   },
 
   modal: {

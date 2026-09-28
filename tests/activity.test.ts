@@ -5,6 +5,7 @@ import type { AdminActivity, RecentGame } from "@/lib/db/types";
 const activity = (extra: Partial<AdminActivity> = {}): AdminActivity => ({
   members: 7,
   onboarded: 0,
+  invited: 0,
   played_this_week: 2,
   games_published: 6,
   next_slot_date: null,
@@ -25,11 +26,14 @@ const recent = (extra: Partial<RecentGame>): RecentGame => ({
 });
 
 describe("Actividad texts", () => {
-  it("does not show an onboarding count before anyone answered it", () => {
+  it("does not show an onboarding count before the invitations went out", () => {
     expect(summaryLine(activity())).toBe("6 juegos publicados · 7 personas en el ritual");
     expect(summaryLine(activity({ games_published: 1, members: 1 }))).toBe("1 juego publicado · 1 persona en el ritual");
-    expect(summaryLine(activity({ onboarded: 3 }))).toBe(
+    expect(summaryLine(activity({ onboarded: 3, invited: 7 }))).toBe(
       "6 juegos publicados · 7 personas en el ritual · 3 de 7 contestaron «Cuéntanos de ti»",
+    );
+    expect(summaryLine(activity({ invited: 7 }))).toBe(
+      "6 juegos publicados · 7 personas en el ritual · 0 de 7 contestaron «Cuéntanos de ti»",
     );
   });
 

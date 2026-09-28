@@ -54,6 +54,15 @@ export const EVENT_KINDS = [
   "modal_failed",
   "ack_failed",
   "decoration_failed",
+  "onboarding_invited",
+  "onboarding_dm_failed",
+  "onboarding_saved",
+  "onboarding_failed",
+  "fact_withdrawn",
+  "fact_added",
+  "fact_failed",
+  "member_erased",
+  "erase_failed",
 ] as const;
 export type EventKind = (typeof EVENT_KINDS)[number];
 
@@ -130,6 +139,26 @@ export function eventLabel(kind: string, detail: Detail = {}): string {
       return "No pude confirmar una respuesta en privado";
     case "decoration_failed":
       return "Una línea extra de un mensaje falló; el mensaje salió sin ella";
+    case "onboarding_invited": {
+      const n = Number(detail.count ?? 0);
+      return n === 1 ? "Invité a 1 persona a contar de sí" : `Invité a ${n} personas a contar de sí`;
+    }
+    case "onboarding_dm_failed":
+      return "No pude mandarle la invitación a una persona";
+    case "onboarding_saved":
+      return "Alguien contó de sí para los juegos";
+    case "onboarding_failed":
+      return "No pude guardar las respuestas de alguien";
+    case "fact_withdrawn":
+      return "Alguien cambió una respuesta: saqué de la cola el juego que la usaba";
+    case "fact_added":
+      return "Alguien agregó un hecho nuevo";
+    case "fact_failed":
+      return "No pude guardar un hecho nuevo";
+    case "member_erased":
+      return "Alguien borró sus datos";
+    case "erase_failed":
+      return "No pude borrar los datos de alguien";
     default:
       return kind;
   }

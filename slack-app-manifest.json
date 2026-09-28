@@ -5,6 +5,11 @@
     "background_color": "#B4552F"
   },
   "features": {
+    "app_home": {
+      "home_tab_enabled": false,
+      "messages_tab_enabled": true,
+      "messages_tab_read_only_enabled": true
+    },
     "bot_user": {
       "display_name": "Rituales",
       "always_online": true
@@ -13,8 +18,8 @@
       {
         "command": "/rituales",
         "url": "https://async-rituals.vercel.app/api/slack/commands",
-        "description": "Salir del ritual o volver a entrar",
-        "usage_hint": "salir",
+        "description": "Un hecho nuevo, salir del ritual o borrar tus datos",
+        "usage_hint": "hecho | salir | borrar-mis-datos",
         "should_escape": false
       }
     ]

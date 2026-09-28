@@ -1,8 +1,19 @@
 import { after } from "next/server";
 import { handleAnswerSubmission } from "@/lib/answers";
+import { handleEraseAction } from "@/lib/commands";
 import { findTeamBySlackId } from "@/lib/db/teams";
 import { answerGameId } from "@/lib/slack/blocks";
 import { logEvent } from "@/lib/events";
+import {
+  ERASE_CANCEL,
+  ERASE_CONFIRM,
+  FACT_ACTION,
+  handleProfileSubmission,
+  ONBOARDING_ACTION,
+  openFactModal,
+  openOnboardingModal,
+  parseMemberRef,
+} from "@/lib/onboarding";
 import { handleViewSubmission, openPlayModal } from "@/lib/play";
 import { getSlackClient } from "@/lib/slack/client";
 import { strings } from "@/lib/slack/strings";
@@ -21,6 +32,7 @@ interface BlockAction {
 interface InteractionPayload {
   type?: string;
   trigger_id?: string;
+  container?: { channel_id?: string; message_ts?: string };
   actions?: BlockAction[];
   user?: { id?: string; team_id?: string };
   team?: { id?: string };
@@ -29,11 +41,15 @@ interface InteractionPayload {
 }
 
 /**
- * Interactivity, three shapes:
- *   answer:{game_id}[:i] → empty 200 now, handleAnswerSubmission inside after(), reply via response_url
- *   play:{game_id}    → empty 200 now, openPlayModal inside after() (views.open must land ≤ 3 s after the tap
- *                        either way; answering first spares the person Slack's warning icon when we are slow)
- *   view_submission   → local checks only, `clear` at once; submit_answer + the private ack run in after()
+ * Interactivity. Every branch answers Slack at once and does the work in after():
+ *   answer:{game_id}[:i]  → handleAnswerSubmission, reply via response_url
+ *   play:{game_id}        → openPlayModal (views.open must land ≤ 3 s after the tap either way; answering
+ *                           first spares the person Slack's warning icon when we are slow)
+ *   onboarding_open       → openOnboardingModal (the DM's "Contestar"; value "{team_id}:{member_id}")
+ *   fact_open             → openFactModal (retry button when /rituales hecho could not open in time)
+ *   erase_confirm/cancel  → handleEraseAction (/rituales borrar-mis-datos)
+ *   rejoin                → opt back in
+ *   view_submission       → local checks only, `clear` at once; saves + the private confirmation run in after()
  */
 export const POST = withSlackRequest(async (req) => {
   const receivedAt = Date.now();
@@ -46,17 +62,14 @@ export const POST = withSlackRequest(async (req) => {
     const view = p.view;
     if (!view?.callback_id) return;
     const db = createAdminClient();
-    const response = handleViewSubmission(
-      db,
-      {
-        callbackId: view.callback_id,
-        slackUserId,
-        privateMetadata: view.private_metadata ?? "",
-        values: view.state?.values ?? {},
-      },
-      after,
-      (teamId) => getSlackClient(db, teamId),
-    );
+    const input = {
+      callbackId: view.callback_id,
+      slackUserId,
+      privateMetadata: view.private_metadata ?? "",
+      values: view.state?.values ?? {},
+    };
+    const slackFor = (teamId: string) => getSlackClient(db, teamId);
+    const response = handleViewSubmission(db, input, after, slackFor) ?? handleProfileSubmission(db, input, after, slackFor);
     return response ? Response.json(response) : undefined;
   }
 
@@ -80,17 +93,50 @@ export const POST = withSlackRequest(async (req) => {
     const triggerId = p.trigger_id;
     if (!triggerId) return;
     const tapped = Number(action.action_ts);
+    const clickedAt = Number.isFinite(tapped) && tapped > 0 ? Math.round(tapped * 1000) : undefined;
     after(() => {
       const db = createAdminClient();
-      return openPlayModal(db, (teamId) => getSlackClient(db, teamId), {
-        gameId,
+      return openPlayModal(db, (teamId) => getSlackClient(db, teamId), { gameId, slackUserId, triggerId, responseUrl, clickedAt, receivedAt });
+    });
+    return;
+  }
+
+  const tapped = Number(action.action_ts);
+  const clickedAt = Number.isFinite(tapped) && tapped > 0 ? Math.round(tapped * 1000) : undefined;
+
+  if (actionId === ONBOARDING_ACTION && p.trigger_id) {
+    const triggerId = p.trigger_id;
+    after(() => {
+      const db = createAdminClient();
+      return openOnboardingModal(db, (teamId) => getSlackClient(db, teamId), {
+        value: action.value,
         slackUserId,
         triggerId,
         responseUrl,
-        clickedAt: Number.isFinite(tapped) && tapped > 0 ? Math.round(tapped * 1000) : undefined,
+        dmChannel: p.container?.channel_id ?? null,
+        dmTs: p.container?.message_ts ?? null,
+        clickedAt,
         receivedAt,
       });
     });
+    return;
+  }
+
+  if (actionId === FACT_ACTION && p.trigger_id) {
+    const ref = parseMemberRef(action.value);
+    const triggerId = p.trigger_id;
+    if (!ref) return;
+    after(() => {
+      const db = createAdminClient();
+      return openFactModal(db, (teamId) => getSlackClient(db, teamId), { ref, slackUserId, triggerId, responseUrl, clickedAt, receivedAt });
+    });
+    return;
+  }
+
+  if ((actionId === ERASE_CONFIRM || actionId === ERASE_CANCEL) && slackTeamId) {
+    after(() =>
+      handleEraseAction(createAdminClient(), { confirmed: actionId === ERASE_CONFIRM, slackTeamId, slackUserId, responseUrl }),
+    );
     return;
   }
 

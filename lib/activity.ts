@@ -4,13 +4,15 @@ import { formatSlotDate } from "@/lib/format";
 
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 
-/** Onboarding does not exist until milestone 5: "0 de 7 con onboarding" read as a failure, so it only shows once someone answered. */
+/** The onboarding count only shows once the invitations went out: before that, "0 de 7" read as a failure. */
 export function summaryLine(activity: AdminActivity): string {
   const parts = [
     plural(activity.games_published, "juego publicado", "juegos publicados"),
     `${plural(activity.members, "persona", "personas")} en el ritual`,
   ];
-  if (activity.onboarded > 0) parts.push(`${activity.onboarded} de ${activity.members} contestaron «Cuéntanos de ti»`);
+  if ((activity.invited ?? 0) > 0 || activity.onboarded > 0) {
+    parts.push(`${activity.onboarded} de ${activity.members} contestaron «Cuéntanos de ti»`);
+  }
   return parts.join(" · ");
 }
 

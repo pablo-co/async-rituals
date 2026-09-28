@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { after } from "next/server";
 import { requireAdmin } from "@/lib/db/session";
 import { logEvent } from "@/lib/events";
+import { inviteMembers } from "@/lib/onboarding";
 import { fillTeam } from "@/lib/queue/fill";
 import { startRun, finishRun } from "@/lib/runs";
 import { getSlackClient } from "@/lib/slack/client";
@@ -15,7 +16,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { postGame } from "@/lib/tick";
 import { cadenceLabel, nextSlotDates, type Cadence } from "@/lib/time";
-import type { GameRow, TeamRow } from "@/lib/db/types";
+import type { GameRow, MemberRow, TeamRow } from "@/lib/db/types";
 
 export async function signOutAction() {
   const supabase = await createClient();
@@ -78,6 +79,16 @@ export async function saveChannelAction(formData: FormData) {
         warning = "welcome";
       }
     }
+
+    // Hito 5: invite everyone in the channel who was never invited to "Cuéntanos de ti" (one DM each, ever).
+    after(async () => {
+      try {
+        const { data: people } = await db.from("members").select("*").eq("team_id", team.id);
+        await inviteMembers(db, slack, fresh, (people ?? []) as MemberRow[]);
+      } catch (inviteError) {
+        await logEvent(db, { teamId: team.id, kind: "onboarding_dm_failed", detail: describeSlackError(inviteError) });
+      }
+    });
 
     // The first week generates in the background (AI takes a while); Cola shows "Generando…" and polls.
     after(async () => {

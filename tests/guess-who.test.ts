@@ -10,6 +10,7 @@ const member = (id: string, name: string, extra: Partial<MemberRow> = {}): Membe
   slack_user_id: `U${id}`,
   display_name: name,
   onboarding_done: true,
+  onboarding_invited_at: null,
   opted_out: false,
   left_at: null,
   created_at: "",

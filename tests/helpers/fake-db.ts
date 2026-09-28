@@ -28,7 +28,7 @@ const RELATIONS: Record<string, Record<string, { table: string; key: string }>> 
 /** Column defaults from 0001_init.sql that the code relies on when it inserts partial rows. */
 const DEFAULTS: Record<string, Row> = {
   teams: { paused_until: null, material_alert_sent_at: null, channel_error_at: null, disconnected_at: null, last_tick_at: null },
-  members: { onboarding_done: false, opted_out: false, left_at: null },
+  members: { onboarding_done: false, onboarding_invited_at: null, opted_out: false, left_at: null },
   facts: { used_at: null, retired: false, source: "seed" },
   games: {
     status: "queued",

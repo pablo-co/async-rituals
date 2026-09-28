@@ -11,10 +11,10 @@ describe("pickSlotDates", () => {
 });
 
 describe("availableRotation", () => {
-  it("starts at the index and only keeps templates that exist today (two_truths waits for hito 5)", () => {
-    expect(availableRotation(0)).toEqual(["guess_who", "this_or_that", "trivia", "puzzle"]);
-    expect(availableRotation(2)).toEqual(["trivia", "puzzle", "guess_who", "this_or_that"]);
-    expect(availableRotation(-1)).toEqual(["puzzle", "guess_who", "this_or_that", "trivia"]);
+  it("starts at the index and walks the whole rotation (recap is never part of it)", () => {
+    expect(availableRotation(0)).toEqual(["guess_who", "this_or_that", "two_truths", "trivia", "puzzle"]);
+    expect(availableRotation(3)).toEqual(["trivia", "puzzle", "guess_who", "this_or_that", "two_truths"]);
+    expect(availableRotation(-1)).toEqual(["puzzle", "guess_who", "this_or_that", "two_truths", "trivia"]);
   });
 });
 
@@ -24,5 +24,7 @@ describe("preferDifferent", () => {
     expect(preferDifferent(["this_or_that", "trivia"], "puzzle")).toEqual(["this_or_that", "trivia"]);
     expect(preferDifferent(["trivia"], "trivia")).toEqual(["trivia"]);
     expect(preferDifferent(["trivia", "puzzle"], null)).toEqual(["trivia", "puzzle"]);
+    // Not first but reachable: a material-less template in front must not lead straight into a repeat.
+    expect(preferDifferent(["two_truths", "trivia", "puzzle"], "trivia")).toEqual(["two_truths", "puzzle", "trivia"]);
   });
 });

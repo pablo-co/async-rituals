@@ -1,7 +1,8 @@
 # BUILD-CONTEXT — estado real de la construcción y contexto para lo que falta
 
-Última actualización: 2026-09-28 (hito 3 cerrado: puntos, rachas y recap; arreglos de "Jugar"/"Enviar" en producción; 7 personas
-activas en #rituales-bot, 0 hechos: Adivina quién y Dos verdades esperan al onboarding del hito 5). Este archivo es el puente entre el plan
+Última actualización: 2026-09-28 (hitos 3 y 5 cerrados: puntos, rachas, recap, onboarding por DM, `/rituales hecho`,
+`borrar-mis-datos` y Dos verdades; arreglos de "Jugar"/"Enviar" en producción; 7 personas activas en #rituales-bot, 0 hechos
+hasta que contesten el onboarding). Este archivo es el puente entre el plan
 (`docs/plans/async-rituals-mvp-plan.md`, escrito antes de construir) y el código real.
 **Cuando el plan y este archivo choquen en detalles de implementación (rutas, nombres, firmas), gana este archivo;
 cuando choquen en decisiones de producto, gana el plan.** Actualízalo al cerrar cada hito.
@@ -25,10 +26,10 @@ Documentos de referencia (no repetidos aquí):
 | --- | --- | --- |
 | 0 · Esqueleto en localhost | ✅ hecho | login real con Supabase Auth; 3 pantallas; `/api/health`; migración 0001 aplicada |
 | 1 · Adivina quién de punta a punta | ✅ código publicado y probado; **sin hechos todavía** (Pablo pospuso cargarlos: llegan con el onboarding del hito 5) | OAuth real (equipo Kublau, canal #rituales-bot, bienvenida enviada, crons corriendo); **7 personas activas** (4 entraron el 2026-09-28); `npm run smoke` contra la base real; falta: hechos → primer Adivina quién real |
-| 2 · Juegos de botones + IA | ✅ Esto o aquello + capa de IA; ⬜ Dos verdades (espera material del onboarding, hito 5) | `npm run eval` 3/3 con `claude-opus-5`; el arreglo de `action_id` duplicado está en producción: **el Esto o aquello del miércoles 30 de septiembre es la primera prueba real** (revisar sus eventos) |
+| 2 · Juegos de botones + IA | ✅ Esto o aquello + capa de IA + Dos verdades (código; sale en cuanto alguien llene el bloque de dos verdades) | `npm run eval` 3/3 con `claude-opus-5`; el arreglo de `action_id` duplicado está en producción: **el Esto o aquello del miércoles 30 de septiembre es la primera prueba real** (revisar sus eventos) |
 | 3 · Puntos, rachas, recap | ✅ (2026-09-28) | `0002_scores.sql` aplicada; `npm run smoke` 30/30 (puntos por plantilla, rachas, recap, momento, RLS); `tests/{recap,scores}.test.ts` + tick (hitos en el hilo, recap después de los reveals del viernes); primer recap real: viernes 2 de octubre ≥ 18:00 |
 | 4 · Trivia y puzzle por modal | ✅ en producción, jugado por el equipo | trivia y puzzle se juegan desde el 16 de septiembre; arreglados en producción: "Enviar" con error de Slack en arranque en frío (24-sep) y "Jugar" con `expired_trigger_id` (28-sep, ver §6 hito 4) |
-| 5 · Onboarding por modal | ⬜ | — |
+| 5 · Onboarding por modal | ✅ código (2026-09-28); **falta que Pablo actualice el manifest y vuelva a guardar el canal** para que salgan los DMs | `0003_onboarding.sql` aplicada; `tests/{onboarding,onboarding-modal,two-truths}.test.ts`; smoke 31/31 |
 | 6 · Veto, generar, pausa, DM admin, Salud | ⬜ (Salud ya se muestra en Actividad) | — |
 | 7 · stats, README/runbook, pulido escritorio | ⬜ | — |
 
@@ -80,6 +81,23 @@ Eventos de raicode ya disparados: `build-started`, `needs-supabase-setup`, `supa
   recap en cualquier estado (vetado o saltado se respeta). Semana sin revelados → `skipped(no_answers)` (no hay motivo propio para
   evitar un `ALTER TYPE … ADD VALUE` dentro de la transacción de la migración). Racha más larga solo si es ≥ 2; top 3 incluye empates
   con el tercero hasta 5 nombres. Evento `recap_posted`. Líneas decorativas que fallan → evento `decoration_failed` y el mensaje sale sin ellas.
+- **Onboarding (hito 5):** el DM "Contestar" sale **una vez por persona** (`members.onboarding_invited_at`, 0003; se escribe solo si el
+  DM llegó) al entrar al canal y al guardar el canal. El botón lleva `"{team_id}:{member_id}"` como `value` para abrir el modal en
+  una sola ida a la base (miembro + respuestas sin usar + token en paralelo); se verifica que el `slack_user_id` coincida. El guardado
+  (en `after()`, como trivia) hace un **diff** contra los hechos de onboarding sin usar: iguales se quedan, los quitados o cambiados
+  se borran y **se vetan los juegos en cola que los usaban** (evento `fact_withdrawn`), los nuevos se insertan; el DM cambia a
+  "Gracias… · Cambiar mis respuestas". Enviar vacío = error ("Contesta al menos una pregunta…"): para borrar todo está
+  `borrar-mis-datos`. `onboarding_done` = contestó algo.
+- **`/rituales` responde 200 vacío al instante** y trabaja en `after()` contestando por `response_url` (antes leía la base dos veces
+  antes de responder: en frío podía pasar los 3 s de Slack). `hecho` abre el modal igual que "Jugar" (si vence el `trigger_id`,
+  botón "Escribir un hecho"); guarda en `after()` y confirma con efímero "Guardado. Puede salir en un próximo Adivina quién."
+  (desviación del plan CEO 6, que guardaba antes de responder: mismo motivo que D-2D).
+- **`borrar-mis-datos`:** avisa y no borra nada hasta "Sí, borrar". Borra respuestas, hechos y la fila del miembro, veta los juegos
+  en cola sobre la persona, y si sigue en el canal crea una **fila nueva** (mismo id de Slack y nombre de Slack, conserva el opt-out,
+  sin historial ni puntos, `onboarding_invited_at` puesto para no reinvitarla). Así "si vuelves a jugar, empiezas de cero" es verdad
+  sin esperar a otra sincronización.
+- **`preferDifferent`** manda la plantilla anterior al final **esté donde esté** en el orden (antes solo si iba primera: con Dos
+  verdades sin material, `[two_truths, trivia, …]` después de una trivia daba otra trivia).
 - El fill desde la web es asíncrono: `saveChannelAction` y `POST /api/queue/fill` (sesión) lo corren en `after()` y responden de
   inmediato; Cola recibe `?generating=1` y `components/QueuePoller.tsx` refresca cada 4 s hasta 20 veces o hasta llenar `QUEUE_TARGET`.
   Con `CRON_SECRET` el fill sigue siendo síncrono (para el cron y para pruebas manuales).
@@ -104,10 +122,11 @@ app/
   api/queue/fill        POST, cron (todos los equipos) o sesión del admin (su equipo)
   api/slack/install     sesión → state firmado → slack.com/oauth/v2/authorize
   api/slack/oauth/callback  state → sesión coincide → oauth.v2.access → rechazo E-1C → upsert teams → set_bot_token → resync si reconexión
-  api/slack/events      url_verification sin firma; resto firmado: app_uninstalled/tokens_revoked, member_joined/left_channel (after)
+  api/slack/events      url_verification sin firma; resto firmado: app_uninstalled/tokens_revoked, member_joined (upsert + DM de
+                        onboarding una vez) / member_left_channel (after)
   api/slack/interactions block_actions: `answer:{game_id}` → handleAnswerSubmission (after) · `play:{game_id}` → openPlayModal
                         (after; 200 vacío primero) · `rejoin` · view_submission → handleViewSubmission (JSON response_action)
-  api/slack/commands    /rituales salir (opt-out + botón Volver a entrar) · otros → "pronto"
+  api/slack/commands    200 vacío + after(handleCommand) → lib/commands.ts
 components/             AppHeader, AppNav (bottom-nav móvil / tabs escritorio), ThemeToggle (useSyncExternalStore),
                         Alert (alert-inline + tono), Badge (data-tone), ListRow, EmptyState, SubmitButton (useFormStatus)
 lib/
@@ -128,6 +147,13 @@ lib/
   games/this-or-that.ts IA; 2 botones (value "0"/"1"); labelFor; reveal "{A}: n · {B}: m." + quip minoritario en hilo
   games/trivia.ts       IA; botón Jugar (`play:{game_id}`); score = aciertos; reveal "Respuestas: 1 … · 2 … · 3 …" + ronda perfecta
   games/puzzle.ts       IA; botón Jugar; normalizeAnswer/isAccepted; reveal "La respuesta era: *…*." + "Lo resolvieron …"
+  games/two-truths.ts   Dos verdades: 3 frases + botones 1/2/3; score = mentira; reveal "La mentira era: «…»." + hilo; labelFor → la frase
+  games/material.ts     pickFreshFact (hecho fresco: sin usar, sin retirar, miembro activo, no reservado en cola; reparte el protagonismo)
+  onboarding.ts         inviteMembers (DM una vez) · openOnboardingModal / openFactModal (after; reintento con botón) ·
+                        handleProfileSubmission (valida → clear) · saveOnboarding (diff + veto) · saveFreeFact · eraseMemberData
+  commands.ts           /rituales en after(): salir · hecho · borrar-mis-datos (aviso) · stats (hito 7) · ayuda; handleEraseAction
+  slack/modals/onboarding.ts  "Cuéntanos de ti": consentimiento, 10 preguntas opcionales (D-7A), bloque 2 verdades (3 o ninguna + mentira)
+  slack/modals/fact.ts  "Un hecho nuevo" (question_key free)
   games/recap.ts        recap del viernes: recap_data + week_moment (falla en suave) → recapLines (orden D-1A) · topRows (empates)
   scores.ts             memberStreaks (rpc member_streaks) · milestoneGroups / streakMilestoneLine (5/10/25, una línea en el hilo)
   activity.ts           summaryLine / gameMeta de Actividad (plurales; "acertaron" nunca en esto o aquello ni antes del reveal)
@@ -161,6 +187,7 @@ components/QueuePoller.tsx  cliente: router.refresh() cada 4 s mientras la cola 
 evals/content.test.ts       generación en vivo (opt-in con `npm run eval`; `npm test` la salta)
 supabase/migrations/0001_init.sql   esquema v1 completo (ver §4)
 supabase/migrations/0002_scores.sql game_points, week_points, member_streaks, member_stats, week_moment, recap_data
+supabase/migrations/0003_onboarding.sql members.onboarding_invited_at; admin_activity devuelve `invited`
 scripts/                migrate.ts · seed-facts.ts (JSON con name|slack_user_id, question_key, text) · check-anthropic.ts ·
                         smoke.ts (equipo desechable contra la base real: Vault, claim concurrente, submit_answer, sweep, ventana de reveal, RLS, vistas)
 tests/                  Vitest + Testing Library; `server-only` se alias a tests/empty.ts (vitest.config.mts)
@@ -210,6 +237,8 @@ Convenciones de `games.payload` por tipo (las que existen y las que faltan deben
   `member_stats(team, member, from, to)` → `{week_points, total_points, streak}` para `/rituales stats` (hito 7),
   `week_moment(team, from, to)` (null si nadie fue engañado o el protagonista ya no está), `recap_data(team, week_start)`.
 - El espejo JS de `member_streaks` está en `tests/helpers/fake-db.ts`; `recap_data`/`week_moment` se enlatan por prueba.
+`0003_onboarding.sql` (hito 5): `members.onboarding_invited_at` y `admin_activity.invited` (Actividad muestra "{n} de {m} contestaron
+«Cuéntanos de ti»" solo cuando ya salió alguna invitación).
 Pendiente (hito 6): nada nuevo en esquema; `paused_until`, `material_alert_sent_at`, `channel_error_at` ya existen.
 
 ---
@@ -269,10 +298,8 @@ Pendiente (hito 6): nada nuevo en esquema; `paused_until`, `material_alert_sent_
 ### Hito 2 · Juegos de botones + IA
 - ✅ `this-or-that.ts`, capa de IA (`lib/ai/*`), muestras sin llave, `POST /api/queue/fill` 202 + `after()`, polling en Cola,
   aviso sin llave en Cola y Conectar.
-- ⬜ `lib/games/two-truths.ts`: material de `facts` kind `two_truths` sin usar (misma reserva que guess_who); render: 3 frases
-  numeradas + 3 botones "1", "2", "3" (`value` = índice); score: `choice === lie_index`; reveal D-1A
-  ("La mentira era: «{frase}»." · hilo "Le atinaron … (+2). {Autor} engañó a {n} (+{n}).") + `labelFor` → la frase elegida.
-  Registrarla en `TEMPLATES`; actualizar `tests/fill.test.ts` (rotación) y agregar `tests/two-truths.test.ts`.
+- ✅ `lib/games/two-truths.ts` (2026-09-28): el post nombra al autor ("{Nombre} nos cuenta tres cosas. Una es mentira: ¿cuál?"),
+  frases numeradas y escapadas, botones 1/2/3; hilo con cierre "{Autor}, ¿nos cuentas?" como adivina quién.
 - ⬜ Prueba real en Slack de esto o aquello, trivia y puzzle (post, botón/modal, ack, reveal e hilo).
 
 ### Hito 3 · Puntos, rachas, recap — ✅ 2026-09-28
@@ -301,14 +328,15 @@ Pendiente (hito 6): nada nuevo en esquema; `paused_until`, `material_alert_sent_
   para saber si el tiempo se va en Slack o en nosotros. Si vuelve a pasar seguido: juntar en una sola función SQL el juego, el
   miembro, la respuesta previa y el token (hoy son 2 idas a la base antes de `views.open`).
 
-### Hito 5 · Onboarding por modal
-- `lib/slack/modals/onboarding.ts` (título "Cuéntanos de ti", 10 inputs opcionales de `QUESTIONS`, bloque opcional de dos
-  verdades con validación "3 frases y marca la mentira, o las tres vacías", `context` de consentimiento).
-- DM con botón "Contestar" al entrar al canal (`member_joined_channel`) y al guardar canal (`saveChannelAction`) para los
-  miembros con `onboarding_done = false`. `view_submission` guarda en `facts` (source `onboarding`), `onboarding_done = true`.
-- `/rituales borrar-mis-datos` (efímero + botón "Sí, borrar" `style: danger`; el borrado ocurre en `block_actions`),
-  `/rituales hecho` (modal de una pregunta, `question_key: 'free'`, insert antes de responder, resetea `material_alert_sent_at`).
-- Sustituye la semilla: `scripts/seed-facts.ts` queda solo para arranques.
+### Hito 5 · Onboarding por modal — ✅ código 2026-09-28
+- ✅ Modal "Cuéntanos de ti", DM "Contestar" (al entrar y al guardar canal), `/rituales hecho`, `/rituales borrar-mis-datos`,
+  Dos verdades. Detalle y desviaciones en §2.
+- **Manifest cambiado** (`slack-app-manifest.json`): `app_home` con la pestaña de Mensajes encendida y de solo lectura (el DM de
+  onboarding vive ahí; el bot no lee respuestas) y la descripción/`usage_hint` del comando. Pablo lo pega en api.slack.com → Rituales
+  → App Manifest; luego vuelve a guardar el canal en Conectar para que salgan los DMs a las 7 personas.
+- Verificar: eventos `onboarding_invited` (7) y ningún `onboarding_dm_failed`; al contestar, `onboarding_saved` y hechos con
+  `source = 'onboarding'`; el siguiente fill ya puede crear Adivina quién y Dos verdades.
+- `scripts/seed-facts.ts` queda solo para arranques.
 
 ### Hito 6 · Veto, generar, pausa, DM al admin, Salud
 - Cola: botón "Vetar" por fila → `components/VetoSheet.tsx` (hoja/modal del tema, foco en Cancelar, Esc y clic afuera),

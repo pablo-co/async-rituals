@@ -34,6 +34,7 @@ export const member = (id: string, name: string, extra: Partial<MemberRow> = {})
   slack_user_id: `U${id}`,
   display_name: name,
   onboarding_done: true,
+  onboarding_invited_at: null,
   opted_out: false,
   left_at: null,
   created_at: "2026-09-01T00:00:00Z",

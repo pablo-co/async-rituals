@@ -256,8 +256,10 @@ async function main() {
       !mine.error && mine.data?.length === 1 && mine.data[0].id === teamId,
       mine.error?.message ?? `${mine.data?.length ?? 0} filas`,
     );
+    await sql`update public.members set onboarding_invited_at = now() where id = ${m1}`;
     const activity = await anon.rpc("admin_activity", { p_team_id: teamId });
     check("Vistas: admin_activity funciona para el propio equipo", !activity.error && activity.data?.members === 2, activity.error?.message);
+    check("Vistas: admin_activity cuenta invitados al onboarding (0003)", activity.data?.invited === 1, `invited ${activity.data?.invited}`);
     const [other] = await sql<{ id: string }[]>`select id from public.teams where id <> ${teamId} limit 1`;
     if (other) {
       const foreign = await anon.rpc("admin_activity", { p_team_id: other.id });

@@ -93,10 +93,14 @@ async function lastGameType(db: SupabaseClient, teamId: string): Promise<GameTyp
   return (data as { type?: GameType } | null)?.type ?? null;
 }
 
-/** Keeps the rotation order but moves `previous` to the end, so a repeat only happens when nothing else has material. */
+/**
+ * Keeps the rotation order but moves `previous` to the end wherever it sits, so a repeat only happens when nothing
+ * else has material. (Moving it only when first was not enough: [two_truths, trivia, …] after a trivia fell through
+ * two_truths without material straight into a second trivia.)
+ */
 export function preferDifferent<T>(order: T[], previous: T | null): T[] {
-  if (order.length < 2 || previous === null || order[0] !== previous) return order;
-  return [...order.slice(1), order[0]];
+  if (order.length < 2 || previous === null || !order.includes(previous)) return order;
+  return [...order.filter((t) => t !== previous), previous];
 }
 
 /**

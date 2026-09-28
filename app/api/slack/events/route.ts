@@ -1,6 +1,8 @@
 import { after } from "next/server";
 import { findTeamBySlackId } from "@/lib/db/teams";
+import type { MemberRow } from "@/lib/db/types";
 import { logEvent } from "@/lib/events";
+import { inviteMembers } from "@/lib/onboarding";
 import { getSlackClient } from "@/lib/slack/client";
 import { withSlackRequest } from "@/lib/slack/verify";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -58,6 +60,14 @@ export const POST = withSlackRequest(
             { onConflict: "team_id,slack_user_id" },
           );
           await logEvent(db, { teamId: team.id, kind: "member_joined" });
+          // Hito 5: the "Cuéntanos de ti" DM, once per person (someone who comes back is not invited twice).
+          const { data: joined } = await db
+            .from("members")
+            .select("*")
+            .eq("team_id", team.id)
+            .eq("slack_user_id", event.user)
+            .maybeSingle();
+          if (joined) await inviteMembers(db, slack, team, [joined as MemberRow]);
           return;
         }
         case "member_left_channel": {
