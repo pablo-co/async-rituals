@@ -25,8 +25,11 @@ export const strings = {
   rejoinButton: "Volver a entrar",
   rejoined: "Listo, ya estás de vuelta en el ritual.",
   left: "Listo, ya no te incluyo. Cuando quieras volver:",
-  commandSoon: "Ese comando llega pronto.",
-  help: "Comandos: /rituales hecho (un dato tuyo para adivinar) · /rituales salir · /rituales borrar-mis-datos.",
+  help: "Comandos: /rituales stats (tus puntos y tu racha) · /rituales hecho (un dato tuyo para adivinar) · /rituales salir · /rituales borrar-mis-datos.",
+  /** `/rituales stats` (D-2D): only the person's own numbers, privately. */
+  stats: (week: number, streak: number, total: number) =>
+    `Esta semana: ${week} ${week === 1 ? "punto" : "puntos"} · racha: ${streak} ${streak === 1 ? "juego seguido" : "juegos seguidos"} · total: ${total}.`,
+  statsFailed: "No pude leer tus puntos. Inténtalo en un momento.",
   saveFailed: "No pude guardar tu respuesta. Inténtalo de nuevo.",
   modalFailed: "No pude abrir el juego. Toca Jugar otra vez.",
   /** Slack gives 3 s to open a modal; a cold server can miss it. The second tap lands on a warm one. */

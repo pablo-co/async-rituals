@@ -5,6 +5,7 @@ import type { MemberRow } from "@/lib/db/types";
 import { logEvent } from "@/lib/events";
 import { ERASE_CANCEL, ERASE_CONFIRM, eraseMemberData, openFactModal } from "@/lib/onboarding";
 import { actions, button, section } from "@/lib/slack/blocks";
+import { addDays, localParts, weekStartOf } from "@/lib/time";
 import { strings } from "@/lib/slack/strings";
 import { ephemeral, postToResponseUrl, type SlashCommand } from "@/lib/slack/verify";
 
@@ -16,7 +17,7 @@ import { ephemeral, postToResponseUrl, type SlashCommand } from "@/lib/slack/ver
  *   salir             opt-out + "Volver a entrar"
  *   hecho             modal "Un hecho nuevo" (openFactModal; if the trigger expired, a button to retry)
  *   borrar-mis-datos  warning + "Sí, borrar" (danger) / "Cancelar"; nothing is deleted until the button
- *   stats             hito 7
+ *   stats             "Esta semana: {p} puntos · racha: {r} juegos seguidos · total: {t}." (member_stats, only their own)
  *   anything else     the list of commands
  */
 type SlackFor = (teamId: string) => Promise<WebClient>;
@@ -64,7 +65,18 @@ export async function handleCommand(
     });
   }
 
-  if (sub === "stats") return reply(strings.commandSoon);
+  if (sub === "stats") {
+    const monday = weekStartOf(localParts(new Date(), team.timezone).date);
+    const { data: stats, error } = await db.rpc("member_stats", {
+      p_team_id: team.id,
+      p_member_id: member.id,
+      p_from: monday,
+      p_to: addDays(monday, 6),
+    });
+    if (error || !stats) return reply(strings.statsFailed);
+    const s = stats as { week_points: number; streak: number; total_points: number };
+    return reply(strings.stats(Number(s.week_points), Number(s.streak), Number(s.total_points)));
+  }
   return reply(strings.help);
 }
 

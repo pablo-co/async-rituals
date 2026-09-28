@@ -1,6 +1,7 @@
 # BUILD-CONTEXT — estado real de la construcción y contexto para lo que falta
 
-Última actualización: 2026-09-28 (hitos 3, 5 y 6 cerrados: veto, "Generar otra semana", pausa, DM al admin y toasts, además de puntos, rachas, recap, onboarding por DM, `/rituales hecho`,
+Última actualización: 2026-09-28 (**todos los hitos construidos**; hito 7: `/rituales stats`, runbook en el README, pulido de
+escritorio. Hitos 3, 5 y 6: veto, "Generar otra semana", pausa, DM al admin y toasts, además de puntos, rachas, recap, onboarding por DM, `/rituales hecho`,
 `borrar-mis-datos` y Dos verdades; arreglos de "Jugar"/"Enviar" en producción; 7 personas activas en #rituales-bot, 0 hechos
 hasta que contesten el onboarding). Este archivo es el puente entre el plan
 (`docs/plans/async-rituals-mvp-plan.md`, escrito antes de construir) y el código real.
@@ -31,7 +32,15 @@ Documentos de referencia (no repetidos aquí):
 | 4 · Trivia y puzzle por modal | ✅ en producción, jugado por el equipo | trivia y puzzle se juegan desde el 16 de septiembre; arreglados en producción: "Enviar" con error de Slack en arranque en frío (24-sep) y "Jugar" con `expired_trigger_id` (28-sep, ver §6 hito 4) |
 | 5 · Onboarding por modal | ✅ código (2026-09-28); **falta que Pablo actualice el manifest y vuelva a guardar el canal** para que salgan los DMs | `0003_onboarding.sql` aplicada; `tests/{onboarding,onboarding-modal,two-truths}.test.ts`; smoke 31/31 |
 | 6 · Veto, generar, pausa, DM admin, Salud | ✅ (2026-09-28) | `tests/queue-manage.test.ts`, `tests/components/{VetoButton,Toaster}.test.tsx`, tick (DMs al admin: tope, transición de canal, falla suave); hoja de veto revisada en teléfono y escritorio |
-| 7 · stats, README/runbook, pulido escritorio | ⬜ | — |
+| 7 · stats, README/runbook, pulido escritorio | ✅ (2026-09-28) | `/rituales stats` con `member_stats`; runbook y checklist de distribución en `README.md`; escritorio medido a 1280 px (columna 640, tabs, toast abajo-derecha, botones sin estirarse) y teléfono a 375 px |
+
+**Pendiente de Pablo (acciones que solo él puede hacer):**
+1. Pegar `slack-app-manifest.json` en api.slack.com → Rituales → App Manifest (pestaña de Mensajes + ayuda del comando) y luego
+   **volver a guardar el canal** en Conectar: salen los DMs "Cuéntanos de ti" a las 7 personas.
+2. Antes del segundo equipo: **Manage Distribution → Activate Public Distribution** (README, "Distribución pública de Slack").
+
+**Pendiente de verificar en Slack real:** miércoles 30-sep Esto o aquello (botones con `action_id` únicos); viernes 2-oct ≥ 18:00 el
+primer recap (`recap_posted`); el primer Adivina quién / Dos verdades cuando haya hechos; el primer DM al admin (`admin_alert`).
 
 Infra ya lista: Supabase (proyecto `tpnnocckdmygxfgizefk`, migración 0001), Vercel (`https://async-rituals.vercel.app`,
 proyecto `personal-af85/async-rituals`, repo conectado: cada push a `main` deploya), 24 crons en `vercel.json`,
@@ -375,7 +384,11 @@ Pendiente (hito 6): nada nuevo en esquema; `paused_until`, `material_alert_sent_
 - `sweep_games` ya devuelve `post_uncertain`: falta el DM "No sé si el juego del {día} llegó al canal…".
 - Toasts reales (`toast` del tema) en lugar de alertas por `searchParams` para Guardado / Vetado / Pausado.
 
-### Hito 7 · Cierre
+### Hito 7 · Cierre — ✅ 2026-09-28
+- `/rituales stats` en `lib/commands.ts` (semana lunes-domingo en la zona del equipo). README: comandos, runbook ("no salió", "duplicado",
+  "cron muerto" con plan B `pg_cron` + `pg_net` cada 15 min, rotación de `CRON_SECRET` / `SLACK_SIGNING_SECRET`), checklist de
+  distribución pública. `SubmitButton` con `md:self-start` (en una columna flex el botón se estiraba a 592 px en escritorio).
+- Lo de abajo es el plan original:
 - `/rituales stats` ("Esta semana: {p} puntos · racha: {r} · total: {t}").
 - README: runbook ("no salió el juego", "duplicado", "cron muerto" → plan B `pg_cron` + `pg_net` cada 15 min), lista
   post-deploy (`/api/health` 200 → Actividad Salud → primer post), rotación manual de `CRON_SECRET` y `SLACK_SIGNING_SECRET`.

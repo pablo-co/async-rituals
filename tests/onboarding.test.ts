@@ -201,6 +201,21 @@ describe("/rituales hecho", () => {
     expect(replies().map((r) => r.text)).toEqual([strings.help, strings.notMember]);
   });
 
+  it("stats answers the person's own week, streak and total, privately", async () => {
+    const { db, slackFor } = setup();
+    const asked: unknown[] = [];
+    db.rpcs.member_stats = (args) => {
+      asked.push(args);
+      return { week_points: 1, streak: 4, total_points: 23 };
+    };
+    await handleCommand(db.client(), slackFor, { command: "/rituales", text: "stats", team_id: "T1", user_id: "Um2", channel_id: "C1", response_url: RESPONSE_URL, trigger_id: "t" });
+    expect(replies()[0].text).toBe("Esta semana: 1 punto · racha: 4 juegos seguidos · total: 23.");
+    expect(asked[0]).toMatchObject({ p_team_id: "t1", p_member_id: "m2" });
+    const { p_from, p_to } = asked[0] as { p_from: string; p_to: string };
+    expect(new Date(`${p_from}T12:00:00Z`).getUTCDay()).toBe(1); // a Monday
+    expect(p_to > p_from).toBe(true);
+  });
+
   it("salir opts out and offers to come back", async () => {
     const { db, slackFor } = setup();
     await handleCommand(db.client(), slackFor, { command: "/rituales", text: "salir", team_id: "T1", user_id: "Um2", channel_id: "C1", response_url: RESPONSE_URL, trigger_id: "t" });

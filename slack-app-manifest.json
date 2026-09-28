@@ -18,8 +18,8 @@
       {
         "command": "/rituales",
         "url": "https://async-rituals.vercel.app/api/slack/commands",
-        "description": "Un hecho nuevo, salir del ritual o borrar tus datos",
-        "usage_hint": "hecho | salir | borrar-mis-datos",
+        "description": "Tus puntos, un hecho nuevo, salir o borrar tus datos",
+        "usage_hint": "stats | hecho | salir | borrar-mis-datos",
         "should_escape": false
       }
     ]

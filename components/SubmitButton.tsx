@@ -3,7 +3,10 @@
 import type { ReactNode } from "react";
 import { useFormStatus } from "react-dom";
 
-/** Submit button with the theme spinner while the server action runs. */
+/**
+ * Submit button with the theme spinner while the server action runs. Full width on phones (DESIGN.md "Móvil");
+ * on desktop it keeps its own width even inside a flex column (`md:self-start`: a column stretches its children).
+ */
 export function SubmitButton({
   children,
   pendingLabel,
@@ -19,7 +22,7 @@ export function SubmitButton({
   return (
     <button
       type="submit"
-      className={`${className} min-h-12 w-full md:w-auto inline-flex items-center justify-center gap-2`}
+      className={`${className} min-h-12 w-full md:w-auto md:self-start inline-flex items-center justify-center gap-2`}
       disabled={disabled || pending}
       aria-disabled={disabled || pending ? true : undefined}
       data-loading={pending || undefined}
