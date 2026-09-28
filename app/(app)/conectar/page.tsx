@@ -57,8 +57,8 @@ export default async function ConectarPage({ searchParams }: { searchParams: Pro
     }
     if (team.channel_id) {
       const [{ count: posted }, { count: queued }, { count: members }] = await Promise.all([
-        db.from("games").select("id", { count: "exact", head: true }).eq("team_id", team.id).in("status", ["posted", "revealing", "revealed"]),
-        db.from("games").select("id", { count: "exact", head: true }).eq("team_id", team.id).eq("status", "queued").eq("is_sample", false),
+        db.from("games").select("id", { count: "exact", head: true }).eq("team_id", team.id).neq("type", "recap").in("status", ["posted", "revealing", "revealed"]),
+        db.from("games").select("id", { count: "exact", head: true }).eq("team_id", team.id).neq("type", "recap").eq("status", "queued").eq("is_sample", false),
         db.from("members").select("id", { count: "exact", head: true }).eq("team_id", team.id).is("left_at", null).eq("opted_out", false),
       ]);
       hasPosted = (posted ?? 0) > 0;

@@ -218,6 +218,30 @@ describe("revealGame", () => {
     expect(db.events("reveal_failed")).toHaveLength(1);
   });
 
+  it("adds one streak milestone line to the thread when someone reaches 5 in a row", async () => {
+    const { db, slack, deps, run, currentTeam } = setup({ game: postedGame() });
+    for (let i = 0; i < 4; i += 1) {
+      db.add("games", game({ id: `p${i}`, type: "trivia", status: "revealed", payload: {}, slot_date: `2026-09-0${i + 7}` }));
+      db.add("answers", answer(`x${i}`, `p${i}`, "m2", "0"));
+    }
+    db.add("answers", answer("a1", "g1", "m2", "m1"), answer("a2", "g1", "m3", "m2"));
+
+    expect(await revealGame(deps(REVEAL_TIME), run, currentTeam(), db.find<GameRow>("games", "g1"))).toBe("revealed");
+    const thread = slack.calls.find((c) => c.method === "chat.postMessage")!;
+    expect(String(thread.args.text).split("\n")).toEqual([expect.stringContaining("Le atinaron Ana"), "Ana: 5 seguidos"]);
+  });
+
+  it("reveals without the milestone line when streaks cannot be read, and logs it", async () => {
+    const { db, slack, deps, run, currentTeam } = setup({ game: postedGame() });
+    db.rpcs.member_streaks = () => {
+      throw new Error("boom");
+    };
+    db.add("answers", answer("a1", "g1", "m2", "m1"));
+    expect(await revealGame(deps(REVEAL_TIME), run, currentTeam(), db.find<GameRow>("games", "g1"))).toBe("revealed");
+    expect(String(slack.calls.find((c) => c.method === "chat.postMessage")!.args.text)).not.toContain("seguidos");
+    expect(db.events("decoration_failed")[0].detail).toMatchObject({ line: "streak_milestones" });
+  });
+
   it("skips a game that was never posted to Slack", async () => {
     const { db, deps, run, currentTeam } = setup({ game: postedGame({ slack_ts: null }) });
     expect(await revealGame(deps(REVEAL_TIME), run, currentTeam(), db.find<GameRow>("games", "g1"))).toBe("skipped");
@@ -235,7 +259,7 @@ describe("tickTeam", () => {
     // The queue was empty after posting, so the fill created a full week ahead: AI games plus a guess-who from an unused fact.
     const queued = db
       .table("games")
-      .filter((g) => g.status === "queued")
+      .filter((g) => g.status === "queued" && g.type !== "recap")
       .sort((a, b) => String(a.slot_date).localeCompare(String(b.slot_date)));
     expect(queued).toHaveLength(8);
     expect(new Set(queued.map((g) => g.slot_date)).size).toBe(8);
@@ -247,6 +271,12 @@ describe("tickTeam", () => {
     expect(guess.every((g) => ["f2", "f3"].includes(String((g.payload as { fact_id: string }).fact_id)))).toBe(true);
     expect(queued.find((g) => g.type === "this_or_that")?.payload).toMatchObject({ preview: "¿Café o té?", options: ["Café", "Té"] });
     expect(run.counts.generated).toBe(8);
+    // One recap per Friday for the next two weeks, Friday 18:00 local (24:00 UTC in September).
+    const recaps = db.table("games").filter((g) => g.type === "recap");
+    expect(recaps.map((g) => [g.slot_date, g.scheduled_for, g.status])).toEqual([
+      ["2026-09-18", "2026-09-19T00:00:00.000Z", "queued"],
+      ["2026-09-25", "2026-09-26T00:00:00.000Z", "queued"],
+    ]);
     expect(currentTeam().last_tick_at).toBe(POST_TIME.toISOString());
 
     // Nothing to reveal at 16:00 local even though 4 h passed: the rule is ≥ 18:00.
@@ -291,6 +321,66 @@ describe("tickTeam", () => {
     await tickTeam(deps(POST_TIME), run, currentTeam());
     expect(db.table("games")).toHaveLength(0);
     expect(run.counts.generated).toBeUndefined();
+  });
+});
+
+describe("Friday recap", () => {
+  /** Friday 2026-09-18, 18:30 Mexico City. */
+  const FRIDAY_EVENING = new Date("2026-09-19T00:30:00Z");
+  const fridayGame = () =>
+    game({
+      status: "posted",
+      slot_date: "2026-09-18",
+      scheduled_for: "2026-09-18T16:00:00.000Z",
+      posted_at: "2026-09-18T16:05:00Z",
+      slack_channel_id: "C1",
+      slack_ts: "1700000000.000100",
+    });
+
+  it("posts after that evening's reveals and stays posted", async () => {
+    const { db, slack, deps, run, currentTeam } = setup({ game: fridayGame() });
+    db.add("answers", answer("a1", "g1", "m2", "m1"));
+    db.add("games", game({ id: "r1", type: "recap", payload: {}, slot_date: "2026-09-18", scheduled_for: "2026-09-19T00:00:00.000Z" }));
+    const revealedWhenAsked: number[] = [];
+    db.rpcs.recap_data = (_args, fake) => {
+      revealedWhenAsked.push(fake.table("games").filter((g) => g.status === "revealed" && g.type !== "recap").length);
+      return {
+        week_start: "2026-09-14",
+        week_end: "2026-09-18",
+        revealed: 1,
+        played: 1,
+        members: 3,
+        top: [{ member_id: "m2", points: 3 }],
+        streak: 1,
+        streak_member_ids: ["m2"],
+      };
+    };
+    db.rpcs.week_moment = () => null;
+
+    const counts = await tickTeam(deps(FRIDAY_EVENING), run, currentTeam());
+
+    expect(counts).toMatchObject({ revealed: 1, posted: 1 });
+    expect(revealedWhenAsked).toEqual([1]); // the recap read the week after g1 was revealed
+    expect(slack.calls.map((c) => c.method)).toEqual(["chat.update", "chat.postMessage", "chat.postMessage"]);
+    const post = slack.calls[2].args;
+    expect(post.thread_ts).toBeUndefined();
+    expect(JSON.stringify(post.blocks)).toContain("*Puntos de la semana:* Ana 3.");
+    expect(JSON.stringify(post.blocks)).toContain("1 de 3 jugaron esta semana.");
+    expect(db.find("games", "r1").status).toBe("posted");
+    expect(db.events("recap_posted")).toHaveLength(1);
+
+    // An hour later nothing about the recap moves: it is never claimed for a reveal.
+    await tickTeam(deps(new Date("2026-09-19T01:30:00Z")), run, currentTeam());
+    expect(db.find("games", "r1").status).toBe("posted");
+  });
+
+  it("is skipped as no_answers when the week had nothing revealed, without touching Slack", async () => {
+    const { db, slack, deps, run, currentTeam } = setup({ game: null });
+    db.add("games", game({ id: "r1", type: "recap", payload: {}, slot_date: "2026-09-18", scheduled_for: "2026-09-19T00:00:00.000Z" }));
+    db.rpcs.recap_data = () => ({ revealed: 0, played: 0, members: 3, top: [], streak: 0, streak_member_ids: [] });
+    await tickTeam(deps(FRIDAY_EVENING), run, currentTeam());
+    expect(db.find("games", "r1")).toMatchObject({ status: "skipped", skip_reason: "no_answers" });
+    expect(slack.postMessage).not.toHaveBeenCalled();
   });
 });
 

@@ -119,6 +119,17 @@ export function isoWeekdayOf(dateISO: string): number {
   return wd === 0 ? 7 : wd;
 }
 
+/** Monday of the week that contains `dateISO` (weeks run Monday to Sunday, like the recap). */
+export function weekStartOf(dateISO: string): string {
+  return addDays(dateISO, 1 - isoWeekdayOf(dateISO));
+}
+
+/** The next `count` Fridays from `dateISO`, including it when it is a Friday. */
+export function upcomingFridays(dateISO: string, count: number): string[] {
+  const first = addDays(dateISO, (5 - isoWeekdayOf(dateISO) + 7) % 7);
+  return Array.from({ length: count }, (_, i) => addDays(first, 7 * i));
+}
+
 /**
  * Upcoming slot dates for a team. Never today after POST_HOUR local, never weekends,
  * never on or before `pausedUntil` (inclusive pause).

@@ -6,7 +6,7 @@ import { availableRotation, TEMPLATES } from "@/lib/games/registry";
 import type { GameType } from "@/lib/games/types";
 import type { GeneratedGame, TemplateContext } from "@/lib/games/template";
 import type { Run } from "@/lib/runs";
-import { localParts, nextSlotDates, slotScheduledFor, type Cadence } from "@/lib/time";
+import { localParts, nextSlotDates, REVEAL_HOUR, slotScheduledFor, upcomingFridays, type Cadence } from "@/lib/time";
 
 /** Keep 8 future slots; the tick refills when fewer than 3 remain. */
 export const QUEUE_TARGET = 8;
@@ -32,6 +32,51 @@ export async function futureQueue(db: SupabaseClient, team: TeamRow, now: Date) 
     .in("status", ["queued", "posting"]);
   if (error) throw new DbError(error.message, error.code);
   return (data ?? []) as { id: string; slot_date: string; type: string; status: string; is_sample: boolean }[];
+}
+
+/** How many Fridays ahead a recap row exists; the tick keeps it true every hour. */
+export const RECAP_WEEKS_AHEAD = 2;
+const POST_WINDOW_MS = 2 * 60 * 60 * 1000;
+
+/**
+ * One recap per Friday at 18:00 local (design doc "la cola"). Only Fridays still claimable (before 20:00)
+ * and outside the pause. A Friday that already has a recap row in any status is left alone, so a vetoed
+ * or skipped recap is never recreated. Cheap enough to run on every tick.
+ */
+export async function ensureRecaps(db: SupabaseClient, team: TeamRow, now: Date): Promise<number> {
+  if (!team.channel_id || team.disconnected_at) return 0;
+  const today = localParts(now, team.timezone).date;
+  const fridays = upcomingFridays(today, RECAP_WEEKS_AHEAD + 1)
+    .filter((friday) => slotScheduledFor(friday, team.timezone, REVEAL_HOUR).getTime() + POST_WINDOW_MS > now.getTime())
+    .slice(0, RECAP_WEEKS_AHEAD)
+    .filter((friday) => !team.paused_until || friday > team.paused_until);
+  if (fridays.length === 0) return 0;
+
+  const { data, error } = await db
+    .from("games")
+    .select("slot_date")
+    .eq("team_id", team.id)
+    .eq("type", "recap")
+    .in("slot_date", fridays);
+  if (error) throw new DbError(error.message, error.code);
+  const existing = new Set(((data ?? []) as { slot_date: string }[]).map((r) => r.slot_date));
+
+  let created = 0;
+  for (const friday of fridays.filter((f) => !existing.has(f))) {
+    const { error: insertError } = await db.from("games").insert({
+      team_id: team.id,
+      type: "recap",
+      payload: {},
+      slot_date: friday,
+      scheduled_for: slotScheduledFor(friday, team.timezone, REVEAL_HOUR).toISOString(),
+    });
+    if (insertError) {
+      if (insertError.code === "23505") continue; // a concurrent tick queued it
+      throw new DbError(insertError.message, insertError.code);
+    }
+    created += 1;
+  }
+  return created;
 }
 
 /** Type of the team's latest game (by slot), so two consecutive slots avoid the same template when one lacks material. */
@@ -66,6 +111,7 @@ export async function fillTeam(
   run?: Run,
 ): Promise<{ created: number; empty: number }> {
   if (!team.channel_id) return { created: 0, empty: 0 };
+  await ensureRecaps(db, team, now);
 
   const future = (await futureQueue(db, team, now)).filter((g) => g.type !== "recap");
   const needed = QUEUE_TARGET - future.length;

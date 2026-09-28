@@ -53,6 +53,7 @@ export const EVENT_KINDS = [
   "fill_failed",
   "modal_failed",
   "ack_failed",
+  "decoration_failed",
 ] as const;
 export type EventKind = (typeof EVENT_KINDS)[number];
 
@@ -127,6 +128,8 @@ export function eventLabel(kind: string, detail: Detail = {}): string {
       return "No pude abrir un juego en Slack";
     case "ack_failed":
       return "No pude confirmar una respuesta en privado";
+    case "decoration_failed":
+      return "Una línea extra de un mensaje falló; el mensaje salió sin ella";
     default:
       return kind;
   }

@@ -32,6 +32,7 @@ function rowMeta(slotDate: string, type: GameType): string {
   const day = formatSlotDate(slotDate);
   if (type === "guess_who") return `${day} · hecho oculto hasta el reveal`;
   if (type === "two_truths") return `${day} · frases ocultas hasta el reveal`;
+  if (type === "recap") return `${day} · por la tarde, después del reveal`;
   return `${day} · ${GAME_LABELS[type]}`;
 }
 
@@ -86,7 +87,7 @@ export default async function ColaPage({ searchParams }: { searchParams: Promise
 
   const today = localParts(new Date(), team.timezone).date;
   const games = await getQueue(supabase, team.id, today);
-  const pending = games.filter((g) => g.status !== "vetoed").length;
+  const pending = games.filter((g) => g.status !== "vetoed" && g.type !== "recap").length;
   const generating = params.generating === "1" && pending < QUEUE_TARGET;
 
   return (

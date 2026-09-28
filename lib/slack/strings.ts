@@ -73,6 +73,23 @@ export const strings = {
     ackSaved: (text: string) => `Guardado: ${text}. Puedes cambiarlo hasta esta tarde.`,
   },
 
+  /** Streak milestones (plan CEO 4): one line in the reveal thread, every milestone reached, no emoji. */
+  streakMilestones: (groups: readonly { names: string[]; count: number }[]) =>
+    groups.map((g) => `${joinEs(g.names)}: ${g.count} seguidos`).join(" · "),
+
+  /** Friday recap (D-1A, fixed order): moment of the week, longest streak, top 3 of the week, who played. */
+  recap: {
+    momentGuessWho: (fact: string, name: string, fooled: number, total: number) =>
+      `*Momento de la semana:* «${fact}» era de ${name}, que engañó a ${fooled} de ${total}.`,
+    momentTwoTruths: (lie: string, name: string, fooled: number, total: number) =>
+      `*Momento de la semana:* la mentira de ${name}, «${lie}», engañó a ${fooled} de ${total}.`,
+    streak: (names: string[], streak: number) => `*Racha más larga:* ${joinEs(names)}, ${streak} juegos seguidos.`,
+    top: (rows: readonly { name: string; points: number }[]) =>
+      `*Puntos de la semana:* ${rows.map((r) => `${r.name} ${r.points}`).join(" · ")}.`,
+    played: (played: number, members: number) => `${played} de ${members} jugaron esta semana.`,
+    fallback: (played: number, members: number) => `Recap de la semana: ${played} de ${members} jugaron.`,
+  },
+
   modal: {
     submit: "Enviar",
     close: "Cancelar",

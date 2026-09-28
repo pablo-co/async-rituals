@@ -161,11 +161,89 @@ async function main() {
     const evening = await sql<{ id: string }[]>`select id from public.claim_due_games(${teamId}, 'reveal', timestamp '2030-01-09 18:30' at time zone 'America/Mexico_City')`;
     check("claim 'reveal': a las 18:30 local sí revela", evening.length === 1 && evening[0].id === revealGame.id);
 
+    // --- 0002 scores: points, streaks, recap and moment of a week in 2030 (nothing else lives there) -----
+    // Park the earlier games so they cannot leak into points or streaks.
+    await sql`update public.games set status = 'skipped', skip_reason = 'out_of_window' where team_id = ${teamId}`;
+    const [fact] = await sql<{ id: string }[]>`
+      insert into public.facts (member_id, kind, payload, source)
+      values (${m1}, 'fact', ${sql.json({ question_key: "first_job", text: "smoke-moment" })}, 'seed') returning id`;
+    const week = async (type: string, day: string, payload: object) => {
+      const [row] = await sql<{ id: string }[]>`
+        insert into public.games (team_id, type, status, payload, slot_date, scheduled_for, posted_at)
+        values (${teamId}, ${type}, 'revealed', ${sql.json(payload as never)}, ${day}::date,
+                (${day}::date + time '10:00') at time zone 'America/Mexico_City',
+                (${day}::date + time '10:05') at time zone 'America/Mexico_City')
+        returning id`;
+      return row.id;
+    };
+    const scored = async (gameId: string, memberId: string, correct: number | null) =>
+      sql`insert into public.answers (game_id, member_id, value, correct_count) values (${gameId}, ${memberId}, '{}'::jsonb, ${correct})`;
+    const questions = [0, 1, 2].map((i) => ({ q: `P${i}`, options: ["a", "b", "c"], correct: i }));
+    const trivia = await week("trivia", "2030-01-14", { preview: "t", title: "t", questions });
+    await scored(trivia, m1, 3); // 1 + 3 + 2 (perfect)
+    await scored(trivia, m2, 1); // 1 + 1
+    const guess = await week("guess_who", "2030-01-15", { fact_id: fact.id, featured_member_id: m1, question_key: "first_job", text: "smoke-moment" });
+    await scored(guess, m2, 0); // 1 for playing; m1 +1 for fooling m2
+    const either = await week("this_or_that", "2030-01-16", { preview: "q", question: "q", options: ["a", "b"], quips: ["x", "y"] });
+    await scored(either, m1, null); // 1
+    await scored(either, m2, null); // 1
+    const riddle = await week("puzzle", "2030-01-17", { preview: "p", prompt: "p", answer: "a", accepted_answers: ["a"] });
+    await scored(riddle, m2, 1); // 1 + 2; m1 did not play → m1's streak is 0
+    await sql`insert into public.games (team_id, type, status, skip_reason, payload, slot_date, scheduled_for)
+              values (${teamId}, 'trivia', 'skipped', 'no_answers', '{}'::jsonb, date '2030-01-18', now())`;
+
+    const points = await sql<{ member_id: string; points: number }[]>`
+      select member_id, points from public.week_points(${teamId}, date '2030-01-14', date '2030-01-18')`;
+    const pointsOf = (id: string) => points.find((p) => p.member_id === id)?.points;
+    check(
+      "Puntos: trivia perfecta 6, protagonista +1 por engañado, esto o aquello 1, puzzle 3 (semana: 8 y 7)",
+      pointsOf(m1) === 8 && pointsOf(m2) === 7,
+      `m1 ${pointsOf(m1)} · m2 ${pointsOf(m2)}`,
+    );
+    const streaks = await sql<{ member_id: string; streak: number }[]>`select * from public.member_streaks(${teamId})`;
+    const streakOf = (id: string) => streaks.find((s) => s.member_id === id)?.streak;
+    check(
+      "Rachas: el juego saltado no rompe, el propio no cuenta, no jugar el último deja 0",
+      streakOf(m2) === 4 && streakOf(m1) === 0,
+      `m1 ${streakOf(m1)} · m2 ${streakOf(m2)}`,
+    );
+    const [{ recap_data: recap }] = await sql<{ recap_data: Record<string, unknown> }[]>`
+      select public.recap_data(${teamId}, date '2030-01-14')`;
+    check(
+      "Recap: 4 revelados, 2 de 2 jugaron, top ordenado y racha más larga",
+      recap.revealed === 4 && recap.played === 2 && recap.members === 2 && recap.streak === 4 &&
+        (recap.top as { member_id: string; points: number }[]).map((t) => `${t.member_id}:${t.points}`).join() === `${m1}:8,${m2}:7` &&
+        JSON.stringify(recap.streak_member_ids) === JSON.stringify([m2]),
+      JSON.stringify(recap),
+    );
+    const [{ week_moment: moment }] = await sql<{ week_moment: Record<string, unknown> | null }[]>`
+      select public.week_moment(${teamId}, date '2030-01-14', date '2030-01-18')`;
+    check(
+      "Momento de la semana: el adivina quién que engañó, con su hecho y N de M",
+      moment?.game_id === guess && moment?.member_id === m1 && moment?.text === "smoke-moment" && moment?.fooled === 1 && moment?.total === 1,
+      JSON.stringify(moment),
+    );
+    await sql`update public.members set opted_out = true where id = ${m1}`;
+    const [{ week_moment: hidden }] = await sql<{ week_moment: unknown }[]>`
+      select public.week_moment(${teamId}, date '2030-01-14', date '2030-01-18')`;
+    await sql`update public.members set opted_out = false where id = ${m1}`;
+    check("Momento de la semana: nunca nombra a quien salió del ritual", hidden === null);
+    const [{ member_stats: stats }] = await sql<{ member_stats: Record<string, number> }[]>`
+      select public.member_stats(${teamId}, ${m2}, date '2030-01-14', date '2030-01-18')`;
+    check("member_stats: semana, total y racha", stats.week_points === 7 && stats.total_points === 7 && stats.streak === 4, JSON.stringify(stats));
+    const [{ recap_data: empty }] = await sql<{ recap_data: Record<string, unknown> }[]>`
+      select public.recap_data(${teamId}, date '2030-01-21')`;
+    check("Recap: una semana sin revelados devuelve revealed 0 (no se publica)", empty.revealed === 0);
+
     // --- RLS: anon sees nothing but health() ------------------------------------------------------
     const anonGames = await anon.from("games").select("id").limit(1);
     check("RLS: la llave publicable no puede leer games", Boolean(anonGames.error), anonGames.error?.code ?? "sin error");
     const anonView = await anon.from("teams_admin").select("id").limit(1);
     check("RLS: la llave publicable no puede leer teams_admin", Boolean(anonView.error), anonView.error?.code ?? "sin error");
+    const anonPoints = await anon.from("game_points").select("member_id").limit(1);
+    check("RLS: la llave publicable no puede leer game_points", Boolean(anonPoints.error), anonPoints.error?.code ?? "sin error");
+    const anonStreaks = await anon.rpc("member_streaks", { p_team_id: teamId });
+    check("RLS: la llave publicable no puede llamar member_streaks", Boolean(anonStreaks.error), anonStreaks.error?.code ?? "sin error");
     const health = await anon.rpc("health");
     check("RLS: health() sí responde con la llave publicable", !health.error && Boolean(health.data));
 
@@ -187,6 +265,8 @@ async function main() {
       const foreignGames = await anon.from("games_admin").select("id").eq("team_id", other.id);
       check("Vistas: games_admin no muestra juegos de otro equipo", !foreignGames.error && foreignGames.data?.length === 0);
     }
+    const adminStreaks = await anon.rpc("recap_data", { p_team_id: teamId, p_week_start: "2030-01-14" });
+    check("RLS: ni el admin con sesión puede leer puntos por persona (recap_data)", Boolean(adminStreaks.error), adminStreaks.error?.code ?? "sin error");
     await anon.auth.signOut();
   } finally {
     // --- cleanup, in FK order ----------------------------------------------------------------------

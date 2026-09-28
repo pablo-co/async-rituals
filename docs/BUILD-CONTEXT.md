@@ -1,6 +1,7 @@
 # BUILD-CONTEXT — estado real de la construcción y contexto para lo que falta
 
-Última actualización: 2026-09-16 (hitos 2 y 4 construidos salvo Dos verdades; Pablo pidió jugar primero los juegos de IA). Este archivo es el puente entre el plan
+Última actualización: 2026-09-28 (hito 3 cerrado: puntos, rachas y recap; arreglos de "Jugar"/"Enviar" en producción; 7 personas
+activas en #rituales-bot, 0 hechos: Adivina quién y Dos verdades esperan al onboarding del hito 5). Este archivo es el puente entre el plan
 (`docs/plans/async-rituals-mvp-plan.md`, escrito antes de construir) y el código real.
 **Cuando el plan y este archivo choquen en detalles de implementación (rutas, nombres, firmas), gana este archivo;
 cuando choquen en decisiones de producto, gana el plan.** Actualízalo al cerrar cada hito.
@@ -23,10 +24,10 @@ Documentos de referencia (no repetidos aquí):
 | Hito | Estado | Verificado |
 | --- | --- | --- |
 | 0 · Esqueleto en localhost | ✅ hecho | login real con Supabase Auth; 3 pantallas; `/api/health`; migración 0001 aplicada |
-| 1 · Adivina quién de punta a punta | ✅ código publicado y probado, **pendiente de prueba real en Slack** | OAuth real hecho (equipo Kublau, canal #rituales-bot, bienvenida enviada, crons corriendo); pruebas del tick y de respuestas con base falsa (`tests/tick.test.ts`, `tests/answers.test.ts`); `npm run smoke` 20/20 contra la base real; falta: ≥ 2 personas en el canal, seed de hechos, primer post y reveal |
-| 2 · Juegos de botones + IA | ✅ Esto o aquello + capa de IA; ⬜ Dos verdades (espera material del onboarding, hito 5) | `npm run eval` 3/3 con `claude-opus-5`; pruebas de plantilla, esquemas y fill; falta la prueba real en Slack |
-| 3 · Puntos, rachas, recap | ⬜ | — |
-| 4 · Trivia y puzzle por modal | ✅ código | `tests/play.test.ts` (modal, initial_option, errores, submit_answer antes de responder); falta la prueba real en Slack |
+| 1 · Adivina quién de punta a punta | ✅ código publicado y probado; **sin hechos todavía** (Pablo pospuso cargarlos: llegan con el onboarding del hito 5) | OAuth real (equipo Kublau, canal #rituales-bot, bienvenida enviada, crons corriendo); **7 personas activas** (4 entraron el 2026-09-28); `npm run smoke` contra la base real; falta: hechos → primer Adivina quién real |
+| 2 · Juegos de botones + IA | ✅ Esto o aquello + capa de IA; ⬜ Dos verdades (espera material del onboarding, hito 5) | `npm run eval` 3/3 con `claude-opus-5`; el arreglo de `action_id` duplicado está en producción: **el Esto o aquello del miércoles 30 de septiembre es la primera prueba real** (revisar sus eventos) |
+| 3 · Puntos, rachas, recap | ✅ (2026-09-28) | `0002_scores.sql` aplicada; `npm run smoke` 30/30 (puntos por plantilla, rachas, recap, momento, RLS); `tests/{recap,scores}.test.ts` + tick (hitos en el hilo, recap después de los reveals del viernes); primer recap real: viernes 2 de octubre ≥ 18:00 |
+| 4 · Trivia y puzzle por modal | ✅ en producción, jugado por el equipo | trivia y puzzle se juegan desde el 16 de septiembre; arreglados en producción: "Enviar" con error de Slack en arranque en frío (24-sep) y "Jugar" con `expired_trigger_id` (28-sep, ver §6 hito 4) |
 | 5 · Onboarding por modal | ⬜ | — |
 | 6 · Veto, generar, pausa, DM admin, Salud | ⬜ (Salud ya se muestra en Actividad) | — |
 | 7 · stats, README/runbook, pulido escritorio | ⬜ | — |
@@ -74,6 +75,11 @@ Eventos de raicode ya disparados: `build-started`, `needs-supabase-setup`, `supa
   (empate → A). `answers.value = { choice: "0" | "1" }` y el ack usa `template.labelFor`.
 - **Trivia:** `answers.value = { choices: number[] }` (índice por pregunta). **Puzzle:** `answers.value = { text }`; `normalizeAnswer`
   también quita el artículo inicial (el/la/un/una/the…).
+- **Recap (hito 3):** no está en la rotación. `ensureRecaps` (`lib/queue/fill.ts`) lo encola en cada tick y en cada fill para los
+  próximos 2 viernes que todavía se pueden publicar (18:00 local + 2 h), fuera de la pausa, y **nunca recrea** un viernes que ya tenga
+  recap en cualquier estado (vetado o saltado se respeta). Semana sin revelados → `skipped(no_answers)` (no hay motivo propio para
+  evitar un `ALTER TYPE … ADD VALUE` dentro de la transacción de la migración). Racha más larga solo si es ≥ 2; top 3 incluye empates
+  con el tercero hasta 5 nombres. Evento `recap_posted`. Líneas decorativas que fallan → evento `decoration_failed` y el mensaje sale sin ellas.
 - El fill desde la web es asíncrono: `saveChannelAction` y `POST /api/queue/fill` (sesión) lo corren en `after()` y responden de
   inmediato; Cola recibe `?generating=1` y `components/QueuePoller.tsx` refresca cada 4 s hasta 20 veces o hasta llenar `QUEUE_TARGET`.
   Con `CRON_SECRET` el fill sigue siendo síncrono (para el cron y para pruebas manuales).
@@ -92,7 +98,7 @@ app/
   (app)/layout.tsx      AppHeader + AppNav + <main class="page page-narrow has-bottom-nav"> + toast-region
   (app)/conectar/       page.tsx (estados por searchParams) · actions.ts (signOut, saveChannel, publishFirstNow)
   (app)/cola/page.tsx   sin canal: empty-state + vista previa con lib/ai/sample-content.json · con canal: games_admin
-  (app)/actividad/      frase grande, meta, Salud (list-row / list-row-details), últimos juegos (admin_activity)
+  (app)/actividad/      frase grande, meta (lib/activity.ts: sin conteo de onboarding hasta que alguien conteste), Salud, últimos juegos
   api/health            200/503 con nombres de variables faltantes, db, anthropic, slack, cron
   api/tick              GET, Bearer CRON_SECRET, maxDuration 120 → lib/tick.runTick
   api/queue/fill        POST, cron (todos los equipos) o sesión del admin (su equipo)
@@ -100,7 +106,7 @@ app/
   api/slack/oauth/callback  state → sesión coincide → oauth.v2.access → rechazo E-1C → upsert teams → set_bot_token → resync si reconexión
   api/slack/events      url_verification sin firma; resto firmado: app_uninstalled/tokens_revoked, member_joined/left_channel (after)
   api/slack/interactions block_actions: `answer:{game_id}` → handleAnswerSubmission (after) · `play:{game_id}` → openPlayModal
-                        (await, antes del 200) · `rejoin` · view_submission → handleViewSubmission (JSON response_action)
+                        (after; 200 vacío primero) · `rejoin` · view_submission → handleViewSubmission (JSON response_action)
   api/slack/commands    /rituales salir (opt-out + botón Volver a entrar) · otros → "pronto"
 components/             AppHeader, AppNav (bottom-nav móvil / tabs escritorio), ThemeToggle (useSyncExternalStore),
                         Alert (alert-inline + tono), Badge (data-tone), ListRow, EmptyState, SubmitButton (useFormStatus)
@@ -122,11 +128,15 @@ lib/
   games/this-or-that.ts IA; 2 botones (value "0"/"1"); labelFor; reveal "{A}: n · {B}: m." + quip minoritario en hilo
   games/trivia.ts       IA; botón Jugar (`play:{game_id}`); score = aciertos; reveal "Respuestas: 1 … · 2 … · 3 …" + ronda perfecta
   games/puzzle.ts       IA; botón Jugar; normalizeAnswer/isAccepted; reveal "La respuesta era: *…*." + "Lo resolvieron …"
+  games/recap.ts        recap del viernes: recap_data + week_moment (falla en suave) → recapLines (orden D-1A) · topRows (empates)
+  scores.ts             memberStreaks (rpc member_streaks) · milestoneGroups / streakMilestoneLine (5/10/25, una línea en el hilo)
+  activity.ts           summaryLine / gameMeta de Actividad (plurales; "acertaron" nunca en esto o aquello ni antes del reveal)
   ai/schemas.ts         zod: thisOrThatSchema, triviaSchema, puzzleSchema; toolInputSchema (JSON Schema draft-7 sin $schema)
   ai/prompts.ts         SYSTEM_PROMPT + EXCLUDED_TOPICS + prompt por plantilla con la lista "temas ya usados"
   ai/generate.ts        generateStructured (tool use + zod + 1 reintento), recentPreviews, generateThisOrThat/Trivia/Puzzle, aiModel
   ai/sample.ts          sampleGame(type) → GeneratedGame con isSample cuando no hay llave
-  play.ts               openPlayModal (views.open antes del 200) · handleViewSubmission (submit_answer → errors | clear + postEphemeral)
+  play.ts               openPlayModal (en after(); si views.open falla → efímero con botón Jugar de nuevo y `since_tap_ms` en el
+                        evento) · handleViewSubmission (solo valida → clear) · saveModalAnswer (after: submit_answer → UN efímero)
   slack/modals/trivia.ts  triviaModal (radio_buttons obligatorios, initial_option) · readTriviaSubmission
   slack/modals/puzzle.ts  puzzleModal (plain_text_input max 80 + hint) · readPuzzleSubmission
   games/questions.ts    las 10 preguntas D-7A (QUESTIONS, QUESTION_KEYS, leadInFor, ANSWER_MAX_LENGTH=280)
@@ -150,6 +160,7 @@ lib/
 components/QueuePoller.tsx  cliente: router.refresh() cada 4 s mientras la cola se genera (?generating=1)
 evals/content.test.ts       generación en vivo (opt-in con `npm run eval`; `npm test` la salta)
 supabase/migrations/0001_init.sql   esquema v1 completo (ver §4)
+supabase/migrations/0002_scores.sql game_points, week_points, member_streaks, member_stats, week_moment, recap_data
 scripts/                migrate.ts · seed-facts.ts (JSON con name|slack_user_id, question_key, text) · check-anthropic.ts ·
                         smoke.ts (equipo desechable contra la base real: Vault, claim concurrente, submit_answer, sweep, ventana de reveal, RLS, vistas)
 tests/                  Vitest + Testing Library; `server-only` se alias a tests/empty.ts (vitest.config.mts)
@@ -158,6 +169,8 @@ tests/                  Vitest + Testing Library; `server-only` se alias a tests
   helpers/fixtures.ts   team/member/fact/game/answer, fakeSlack() (chat.postMessage/update grabados), slackPlatformError(code)
   tick.test.ts          postGame/revealGame/tickTeam/runTick: fail-closed, desconexión, canal, reveal idempotente, refill, aislamiento
   answers.test.ts       handleAnswerSubmission con fetch simulado (Guardado / Cambiado / protagonista / cerró / fuera)
+  recap.test.ts         líneas del recap, empates, escape, render con rpc enlatadas, ensureRecaps (vetado, pausa, ventana)
+  scores.test.ts        hitos de racha y el espejo de member_streaks
 vercel.json             24 crons `0 H * * *` → /api/tick
 slack-app-manifest.json fuente de verdad de la app de Slack (scopes, URLs, eventos)
 ```
@@ -190,8 +203,13 @@ Convenciones de `games.payload` por tipo (las que existen y las que faltan deben
 `facts.payload`: `fact` → `{ question_key, text }` · `two_truths` → `{ statements: [3], lie_index }`.
 `used_at` se marca al llegar a `posted` (lo hace `postGame` leyendo `payload.fact_id`); vale para `two_truths` también.
 
-Pendiente de migración (hito 3, `0002_scores.sql`): vistas/funciones de **puntos por juego**, **puntos de la semana**,
-**tabla semanal**, **racha vigente** (definición exacta en el plan CEO, "Vista de rachas"), y `member_streaks(team)`.
+`0002_scores.sql` (hito 3, solo service role; nada se guarda aparte):
+- vista `game_points` (una fila por persona y juego revelado: 1 por jugar + acierto + ronda perfecta; protagonista +1 por
+  engañado, máx. 5, con su propia fila). La tabla de puntos del design doc vive **solo** aquí.
+- `week_points(team, from, to)`, `member_streaks(team)` (racha vigente del plan CEO; una fila por miembro activo, 0 incluido),
+  `member_stats(team, member, from, to)` → `{week_points, total_points, streak}` para `/rituales stats` (hito 7),
+  `week_moment(team, from, to)` (null si nadie fue engañado o el protagonista ya no está), `recap_data(team, week_start)`.
+- El espejo JS de `member_streaks` está en `tests/helpers/fake-db.ts`; `recap_data`/`week_moment` se enlatan por prueba.
 Pendiente (hito 6): nada nuevo en esquema; `paused_until`, `material_alert_sent_at`, `channel_error_at` ya existen.
 
 ---
@@ -214,8 +232,10 @@ Pendiente (hito 6): nada nuevo en esquema; `paused_until`, `material_alert_sent_
   ok:false: seguro que no publicó → `skipped(template_error)` con el mensaje de validación de Slack en `detail`) de `transient`
   (puede haber llegado → nunca se re-publica). `tests/helpers/fake-db.ts` tiene `db.clock`: toda prueba que inyecte `now` debe fijarlo. Nunca `<@U…>` ni `@channel`;
   nombres planos desde `display_name` escapados con `escapeSlackText`. Un emoji máximo por mensaje (excepción: puzzle de emojis).
-  Modales (hito 4/5): `views.open` **antes** del 200, `private_metadata` con `game_id` y `channel_id`; en `view_submission`
-  la escritura va antes de responder (`response_action: errors | clear`) y la confirmación por `chat.postEphemeral`.
+  Modales (hito 4/5): 200 vacío primero y `views.open` en `after()` (el `trigger_id` vence 3 s después del toque, respondamos o no;
+  si vence, efímero con el botón otra vez: el segundo toque cae en un servidor caliente). `private_metadata` con `game_id` y
+  `channel_id`. En `view_submission` solo se valida lo que mandó Slack y se responde `clear`/`errors` al instante; la escritura va en
+  `after()` y la verdad llega por UN `chat.postEphemeral` (desviación de D-2D, ver hito 4).
 - **Nunca IA dentro de un handler de Slack.** La IA (hito 2) vive en `lib/ai/generate.ts`: Anthropic con tool use +
   esquema `zod` por plantilla, un reintento con el error en el prompt, luego `null` → rotación; evento `generation_failed`.
   Modelo: el más capaz disponible al construir (ver CLAUDE.md, "Environment"); temas excluidos en `lib/ai/prompts.ts`
@@ -255,14 +275,14 @@ Pendiente (hito 6): nada nuevo en esquema; `paused_until`, `material_alert_sent_
   Registrarla en `TEMPLATES`; actualizar `tests/fill.test.ts` (rotación) y agregar `tests/two-truths.test.ts`.
 - ⬜ Prueba real en Slack de esto o aquello, trivia y puzzle (post, botón/modal, ack, reveal e hilo).
 
-### Hito 3 · Puntos, rachas, recap
-- `supabase/migrations/0002_scores.sql`: vistas de puntos por juego / semana / tabla, racha vigente, `member_streaks`.
-- `lib/games/recap.ts`: tipo `recap`, `scheduled_for` viernes 18:00 local (`slotScheduledFor(date, tz, REVEAL_HOUR)`),
-  el fill inserta una fila por viernes (índice parcial evita duplicados); orden fijo D-1A: momento de la semana (plan CEO 2),
-  racha viva más larga, top 3 con puntos de esa semana, "{n} de {m} jugaron esta semana"; sin juegos revelados → no se publica.
-  El recap es terminal en `posted` (el claim de reveal ya excluye `recap`).
-- Hitos de racha en el hilo del reveal (plan CEO 4): línea única, sin emoji, falla en suave → en `revealGame`, no en la plantilla.
-- `/rituales stats` queda para el hito 7 pero usa estas vistas.
+### Hito 3 · Puntos, rachas, recap — ✅ 2026-09-28
+- ✅ `0002_scores.sql` (ver §4), `lib/scores.ts`, `lib/games/recap.ts`, `ensureRecaps`, hitos de racha en `revealGame` (se calculan
+  antes de publicar el hilo y solo si el hilo falta: un reveal reintentado no recuenta).
+- Textos del recap (no venían literales en el plan; decididos aquí, en `strings.recap`): "*Momento de la semana:* «{hecho}» era de
+  {Nombre}, que engañó a {N} de {M}." · dos verdades: "la mentira de {Nombre}, «{frase}», engañó a {N} de {M}." · "*Racha más larga:*
+  {Nombres}, {r} juegos seguidos." · "*Puntos de la semana:* Ana 12 · Luis 9 · Pedro 7." · "{n} de {m} jugaron esta semana."
+- Verificar el viernes 2 de octubre ≥ 18:00: evento `recap_posted` y el post en #rituales-bot.
+- `/rituales stats` (hito 7) solo necesita `member_stats`.
 
 ### Hito 4 · Trivia y puzzle por modal
 - ✅ Todo el código (`lib/games/{trivia,puzzle}.ts`, `lib/slack/modals/*`, `lib/play.ts`, ruta de interacciones). Los modales no
@@ -274,7 +294,12 @@ Pendiente (hito 6): nada nuevo en esquema; `paused_until`, `material_alert_sent_
   "Este juego ya cerró." / "No estás en el ritual." / "No pude guardar…"). El caso "ya cerró" deja de ser error dentro del modal y
   pasa a mensaje privado. `openPlayModal` hace 2 viajes a la base (juego → miembro + respuesta previa + token en paralelo).
   Las plantillas cargan `lib/ai/generate` con `import()` dinámico: las rutas de Slack y el tick no cargan el SDK de Anthropic.
-- ⬜ Prueba real en Slack (ver hito 2).
+- **"Jugar" con `expired_trigger_id` (2026-09-28, justo después de que entraran 4 personas):** Slack da 3 s desde el toque para
+  `views.open`; medido desde fuera: la ruta en frío ~2 s + `views.open` ~0.3 s + la entrega de Slack. Ahora el 200 sale primero,
+  `openPlayModal` corre en `after()`, y si Slack rechaza el modal la persona recibe un efímero "Me tardé en abrir el juego. Toca Jugar
+  otra vez." con el botón (`playButton` en `lib/slack/blocks.ts`). El evento `modal_failed` guarda `since_tap_ms` y `handler_ms`
+  para saber si el tiempo se va en Slack o en nosotros. Si vuelve a pasar seguido: juntar en una sola función SQL el juego, el
+  miembro, la respuesta previa y el token (hoy son 2 idas a la base antes de `views.open`).
 
 ### Hito 5 · Onboarding por modal
 - `lib/slack/modals/onboarding.ts` (título "Cuéntanos de ti", 10 inputs opcionales de `QUESTIONS`, bloque opcional de dos

@@ -442,4 +442,24 @@ export const defaultRpcs: Record<string, FakeRpc> = {
   },
 
   get_bot_token: () => "xoxb-fake",
+
+  /** 0002_scores.sql member_streaks: answered games in a row, newest revealed first, skipping own games. */
+  member_streaks: ({ p_team_id }, db) => {
+    const revealed = db
+      .table("games")
+      .filter((g) => g.team_id === p_team_id && g.status === "revealed" && g.type !== "recap")
+      .sort((a, b) => compare(b.slot_date, a.slot_date) || compare(b.posted_at, a.posted_at));
+    return db
+      .table("members")
+      .filter((m) => m.team_id === p_team_id && !m.left_at && !m.opted_out)
+      .map((m) => {
+        let streak = 0;
+        for (const g of revealed) {
+          if ((g.payload as Row | null)?.featured_member_id === m.id) continue;
+          if (!db.table("answers").some((a) => a.game_id === g.id && a.member_id === m.id)) break;
+          streak += 1;
+        }
+        return { member_id: m.id, streak };
+      });
+  },
 };

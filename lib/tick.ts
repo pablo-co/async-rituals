@@ -5,8 +5,9 @@ import { DbError, TemplateError } from "@/lib/errors";
 import { logEvent } from "@/lib/events";
 import { templateFor } from "@/lib/games/registry";
 import type { SkipReason } from "@/lib/games/types";
-import { fillTeam, futureQueue, QUEUE_LOW } from "@/lib/queue/fill";
+import { ensureRecaps, fillTeam, futureQueue, QUEUE_LOW } from "@/lib/queue/fill";
 import { count, finishRun, forEachTeam, startRun, type Run } from "@/lib/runs";
+import { streakMilestoneLine } from "@/lib/scores";
 import { describeSlackError, mapSlackError } from "@/lib/slack/errors";
 
 /**
@@ -19,8 +20,10 @@ import { describeSlackError, mapSlackError } from "@/lib/slack/errors";
  *                              │ disconnected   ──▶ back to queued + teams.disconnected_at
  *                              │ Slack rejects  ──▶ skipped(template_error) with Slack's reason (it certainly did not post)
  *                              └ Slack down     ──▶ stays posting; reclaimed by the next sweep (E-1B)
+ *   recap (Friday 18:00 local): queued → posting → posted, terminal; a week with nothing revealed → skipped(no_answers)
  *
- * Order per team: sweep → reveal → post → refill (if the queue is low) → last_tick_at.
+ * Order per team: sweep → reveal → post (the recap after that evening's reveals) → recaps queued for the next
+ * two Fridays → refill (if the queue is low) → last_tick_at.
  */
 export interface TickDeps {
   db: SupabaseClient;
@@ -106,7 +109,9 @@ export async function postGame(
     rendered = await template.render({ db, team, now }, game, members);
   } catch (error) {
     const reason: SkipReason =
-      error instanceof TemplateError && error.code === "featured_inactive" ? "featured_inactive" : "template_error";
+      error instanceof TemplateError && (error.code === "featured_inactive" || error.code === "no_answers")
+        ? error.code
+        : "template_error";
     await markSkipped(db, run, game, reason, {
       message: (error instanceof Error ? error.message : String(error)).slice(0, 300),
     });
@@ -164,7 +169,13 @@ export async function postGame(
   if (factId) await db.from("facts").update({ used_at: nowIso }).eq("id", factId);
   if (team.channel_error_at) await db.from("teams").update({ channel_error_at: null }).eq("id", team.id);
 
-  await logEvent(db, { teamId: team.id, runId: run?.id, kind: "posted", gameId: game.id, detail: { type: game.type } });
+  await logEvent(db, {
+    teamId: team.id,
+    runId: run?.id,
+    kind: game.type === "recap" ? "recap_posted" : "posted",
+    gameId: game.id,
+    detail: { type: game.type },
+  });
   return "posted";
 }
 
@@ -185,6 +196,24 @@ export async function revealGame(
   if (answersError) throw new DbError(answersError.message, answersError.code);
   const answers = (answerRows ?? []) as AnswerRow[];
   const template = templateFor(game.type);
+
+  // Decorative line (plan CEO 4): fails soft, the reveal goes out without it. Only computed while the
+  // thread is still to be posted, so a retried reveal never recounts.
+  let milestones: string | null = null;
+  if (answers.length > 0 && !game.revealed_thread_ts) {
+    try {
+      milestones = await streakMilestoneLine(db, team.id, answers, members);
+    } catch (error) {
+      await logEvent(db, {
+        teamId: team.id,
+        runId: run?.id,
+        kind: "decoration_failed",
+        gameId: game.id,
+        detail: { line: "streak_milestones", message: (error instanceof Error ? error.message : String(error)).slice(0, 300) },
+      });
+    }
+  }
+
   const slack = await deps.slackFor(team);
 
   try {
@@ -201,12 +230,13 @@ export async function revealGame(
     }
     const out = template.reveal({ game, answers, members, scores });
     await slack.chat.update({ channel: game.slack_channel_id, ts: game.slack_ts, blocks: out.blocks, text: out.text });
-    if (out.thread && !game.revealed_thread_ts) {
+    const thread = [out.thread, milestones].filter(Boolean).join("\n");
+    if (thread && !game.revealed_thread_ts) {
       const reply = await slack.chat.postMessage({
         channel: game.slack_channel_id,
         thread_ts: game.slack_ts,
         reply_broadcast: true,
-        text: out.thread,
+        text: thread,
       });
       await db.from("games").update({ revealed_thread_ts: reply.ts ?? null }).eq("id", game.id);
     }
@@ -248,11 +278,14 @@ export async function tickTeam(deps: TickDeps, run: Run, team: TeamRow): Promise
     counts[result] += 1;
   }
 
-  const queued = (await futureQueue(deps.db, team, deps.now)).filter((g) => g.type !== "recap" && !g.is_sample);
-  if (queued.length < QUEUE_LOW) {
-    const fresh = await deps.db.from("teams").select("*").eq("id", team.id).single();
-    if (!fresh.error && !fresh.data.disconnected_at) {
-      const filled = await fillTeam(deps.db, fresh.data as TeamRow, deps.now, run);
+  // Fresh row: a post in this same tick may have just marked the team disconnected.
+  const fresh = await deps.db.from("teams").select("*").eq("id", team.id).single();
+  if (!fresh.error && !fresh.data.disconnected_at) {
+    const current = fresh.data as TeamRow;
+    await ensureRecaps(deps.db, current, deps.now);
+    const queued = (await futureQueue(deps.db, current, deps.now)).filter((g) => g.type !== "recap" && !g.is_sample);
+    if (queued.length < QUEUE_LOW) {
+      const filled = await fillTeam(deps.db, current, deps.now, run);
       count(run, "generated", filled.created);
     }
   }

@@ -7,6 +7,8 @@ import {
   localParts,
   nextSlotDates,
   slotScheduledFor,
+  upcomingFridays,
+  weekStartOf,
   zonedTimeToUtc,
 } from "@/lib/time";
 
@@ -48,6 +50,15 @@ describe("calendar helpers", () => {
   it("knows ISO weekdays", () => {
     expect(isoWeekdayOf("2026-09-14")).toBe(1); // Monday
     expect(isoWeekdayOf("2026-09-20")).toBe(7); // Sunday
+  });
+  it("finds the Monday of a week and the next Fridays", () => {
+    expect(weekStartOf("2026-09-18")).toBe("2026-09-14"); // Friday → Monday
+    expect(weekStartOf("2026-09-14")).toBe("2026-09-14");
+    expect(weekStartOf("2026-09-20")).toBe("2026-09-14"); // Sunday belongs to the same week
+    expect(weekStartOf("2026-10-01")).toBe("2026-09-28"); // across a month end
+    expect(upcomingFridays("2026-09-16", 2)).toEqual(["2026-09-18", "2026-09-25"]);
+    expect(upcomingFridays("2026-09-18", 2)).toEqual(["2026-09-18", "2026-09-25"]); // today when it is Friday
+    expect(upcomingFridays("2026-09-19", 1)).toEqual(["2026-09-25"]);
   });
   it("labels cadences in Spanish", () => {
     expect(cadenceLabel(3)).toBe("lunes, miércoles y viernes");

@@ -1,17 +1,22 @@
 import { TemplateError } from "@/lib/errors";
 import { guessWho } from "./guess-who";
 import { puzzle } from "./puzzle";
+import { recap } from "./recap";
 import type { GameTemplate } from "./template";
 import { thisOrThat } from "./this-or-that";
 import { trivia } from "./trivia";
 import { ROTATION, type GameType } from "./types";
 
-/** Templates that exist today. `two_truths` arrives with the onboarding material (hito 5); the fill only uses what is here. */
+/**
+ * Templates that exist today. `two_truths` arrives with the onboarding material (hito 5); the fill only uses
+ * what is here. `recap` is registered so the tick can post it, but it is not in ROTATION (ensureRecaps queues it).
+ */
 export const TEMPLATES: Partial<Record<GameType, GameTemplate>> = {
   guess_who: guessWho,
   this_or_that: thisOrThat,
   trivia,
   puzzle,
+  recap,
 };
 
 export function templateFor(type: GameType): GameTemplate {
