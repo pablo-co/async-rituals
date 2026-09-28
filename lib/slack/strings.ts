@@ -27,7 +27,9 @@ export const strings = {
   left: "Listo, ya no te incluyo. Cuando quieras volver:",
   commandSoon: "Ese comando llega pronto. Por ahora: /rituales salir.",
   saveFailed: "No pude guardar tu respuesta. Inténtalo de nuevo.",
-  modalFailed: "No pude abrir el juego. Inténtalo de nuevo.",
+  modalFailed: "No pude abrir el juego. Toca Jugar otra vez.",
+  /** Slack gives 3 s to open a modal; a cold server can miss it. The second tap lands on a warm one. */
+  modalSlow: "Me tardé en abrir el juego. Toca Jugar otra vez.",
 
   welcome: (days: string, pausedUntil: string | null) =>
     `Hola, soy Rituales. Voy a publicar juegos cortos aquí los ${days} por la mañana` +

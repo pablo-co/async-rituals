@@ -6,7 +6,7 @@ import type {
   SectionBlock,
   StaticSelect,
 } from "@slack/web-api";
-import { clampLabel, LIMITS } from "./strings";
+import { clampLabel, LIMITS, strings } from "./strings";
 
 export interface Option {
   label: string;
@@ -69,4 +69,9 @@ export function answerSelect(blockId: string, actionId: string, placeholder: str
 
 export function actions(blockId: string, elements: Button[]): ActionsBlock {
   return { type: "actions", block_id: blockId, elements };
+}
+
+/** The "Jugar" row of a modal game (trivia, puzzle), also re-offered when a modal could not open in time. */
+export function playButton(gameId: string): ActionsBlock {
+  return actions(`play:${gameId}`, [button(`play:${gameId}`, strings.play, gameId, "primary")]);
 }

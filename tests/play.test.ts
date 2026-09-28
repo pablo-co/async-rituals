@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { handleViewSubmission, openPlayModal } from "@/lib/play";
 import { strings } from "@/lib/slack/strings";
 import { FakeDb } from "./helpers/fake-db";
-import { answer, fakeSlack, game, member, team } from "./helpers/fixtures";
+import { answer, fakeSlack, game, member, slackPlatformError, team } from "./helpers/fixtures";
 
 const RESPONSE_URL = "https://hooks.slack.com/actions/T1/1/abc";
 const fetchMock = vi.fn(async () => new Response("ok", { status: 200 }));
@@ -126,11 +126,35 @@ describe("openPlayModal", () => {
     expect(slack.viewsOpen).not.toHaveBeenCalled();
   });
 
-  it("logs modal_failed and tells the person when views.open fails", async () => {
+  it("re-offers Jugar when Slack says the tap expired, and logs how late we were", async () => {
     const { db, slack, slackFor } = setup();
-    slack.viewsOpen.mockRejectedValueOnce(new Error("expired_trigger_id"));
+    slack.viewsOpen.mockRejectedValueOnce(slackPlatformError("expired_trigger_id"));
+    const now = Date.now();
+    await openPlayModal(db.client(), slackFor, {
+      gameId: "gt",
+      slackUserId: "Um1",
+      triggerId: "trig",
+      responseUrl: RESPONSE_URL,
+      clickedAt: now - 3400,
+      receivedAt: now - 900,
+    });
+    const reply = lastReply();
+    expect(reply.text).toBe(strings.modalSlow);
+    const button = (reply.blocks?.[1] as { elements: { action_id: string }[] }).elements[0];
+    expect(button.action_id).toBe("play:gt");
+    const [event] = db.events("modal_failed");
+    const detail = event.detail as { code: string; since_tap_ms: number; handler_ms: number };
+    expect(detail.code).toBe("expired_trigger_id");
+    expect(detail.since_tap_ms).toBeGreaterThanOrEqual(3400);
+    expect(detail.handler_ms).toBeGreaterThanOrEqual(900);
+  });
+
+  it("says it could not open for any other failure, still with a Jugar button", async () => {
+    const { db, slack, slackFor } = setup();
+    slack.viewsOpen.mockRejectedValueOnce(new Error("boom"));
     await openPlayModal(db.client(), slackFor, { gameId: "gt", slackUserId: "Um1", triggerId: "trig", responseUrl: RESPONSE_URL });
     expect(lastReply().text).toBe(strings.modalFailed);
+    expect(JSON.stringify(lastReply().blocks)).toContain("play:gt");
     expect(db.events("modal_failed")).toHaveLength(1);
   });
 });

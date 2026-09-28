@@ -13,6 +13,7 @@ export const dynamic = "force-dynamic";
 
 interface BlockAction {
   action_id?: string;
+  action_ts?: string;
   value?: string;
   selected_option?: { value?: string };
 }
@@ -30,10 +31,12 @@ interface InteractionPayload {
 /**
  * Interactivity, three shapes:
  *   answer:{game_id}[:i] → empty 200 now, handleAnswerSubmission inside after(), reply via response_url
- *   play:{game_id}    → views.open BEFORE the 200 (trigger_id lives 3 s), then empty 200
+ *   play:{game_id}    → empty 200 now, openPlayModal inside after() (views.open must land ≤ 3 s after the tap
+ *                        either way; answering first spares the person Slack's warning icon when we are slow)
  *   view_submission   → local checks only, `clear` at once; submit_answer + the private ack run in after()
  */
 export const POST = withSlackRequest(async (req) => {
+  const receivedAt = Date.now();
   if (req.kind !== "interaction") return;
   const p = req.payload as InteractionPayload;
   const slackUserId = p.user?.id;
@@ -74,13 +77,19 @@ export const POST = withSlackRequest(async (req) => {
 
   if (actionId.startsWith("play:")) {
     const gameId = actionId.slice("play:".length);
-    if (!p.trigger_id) return;
-    const db = createAdminClient();
-    await openPlayModal(db, (teamId) => getSlackClient(db, teamId), {
-      gameId,
-      slackUserId,
-      triggerId: p.trigger_id,
-      responseUrl,
+    const triggerId = p.trigger_id;
+    if (!triggerId) return;
+    const tapped = Number(action.action_ts);
+    after(() => {
+      const db = createAdminClient();
+      return openPlayModal(db, (teamId) => getSlackClient(db, teamId), {
+        gameId,
+        slackUserId,
+        triggerId,
+        responseUrl,
+        clickedAt: Number.isFinite(tapped) && tapped > 0 ? Math.round(tapped * 1000) : undefined,
+        receivedAt,
+      });
     });
     return;
   }

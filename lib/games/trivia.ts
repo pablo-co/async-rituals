@@ -1,7 +1,7 @@
 import { sampleGame } from "@/lib/ai/sample";
 import type { GameRow } from "@/lib/db/types";
 import { hasAnthropicKey } from "@/lib/env";
-import { actions, button, context, header, section } from "@/lib/slack/blocks";
+import { context, header, playButton, section } from "@/lib/slack/blocks";
 import { strings } from "@/lib/slack/strings";
 import { escapeSlackText } from "@/lib/slack/text";
 import { activeMembers, contentHash, memberName, type GameTemplate, type RevealInput } from "./template";
@@ -54,7 +54,7 @@ export const trivia: GameTemplate = {
     const blocks = [
       header(strings.header("trivia")),
       section(`*${escapeSlackText(p.title)}*\n${strings.trivia.intro(p.questions.length)}`),
-      actions(`play:${game.id}`, [button(`play:${game.id}`, strings.play, game.id, "primary")]),
+      playButton(game.id),
       context(strings.contextPending),
     ];
     if (p.resumed) blocks.push(context(strings.contextResumed));

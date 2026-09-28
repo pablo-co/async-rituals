@@ -3,7 +3,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { GameRow, MemberRow } from "@/lib/db/types";
 import { logEvent } from "@/lib/events";
 import { triviaPayload } from "@/lib/games/trivia";
-import { actions, button, section } from "@/lib/slack/blocks";
+import { actions, button, playButton, section } from "@/lib/slack/blocks";
 import { describeSlackError } from "@/lib/slack/errors";
 import { PUZZLE_CALLBACK, puzzleModal, readPuzzleSubmission } from "@/lib/slack/modals/puzzle";
 import { readTriviaSubmission, TRIVIA_CALLBACK, triviaModal, type SubmissionRead } from "@/lib/slack/modals/trivia";
@@ -14,8 +14,11 @@ import { ephemeral, postToResponseUrl } from "@/lib/slack/verify";
  * Modal games (trivia, puzzle). Slack gives us 3 seconds for both halves, and a cold start alone
  * can take 2.5 s (measured 2026-09-24), so the synchronous part does as little as possible:
  *
- *   "Jugar" (block_actions) ──▶ openPlayModal: game (1 round trip) → member + previous answer + token
- *                                (1 parallel round trip) → views.open BEFORE the 200 (trigger_id lives 3 s)
+ *   "Jugar" (block_actions) ──▶ empty 200 at once, then in after(): openPlayModal: game (1 round trip) →
+ *                                member + previous answer + token (1 parallel round trip) → views.open
+ *                                (trigger_id lives 3 s from the tap; a cold server can miss it: 2026-09-28,
+ *                                expired_trigger_id → private "Me tardé…" with a fresh Jugar button; the second
+ *                                tap lands on a warm server)
  *   Enviar (view_submission) ──▶ handleViewSubmission: only local checks → `clear` right away
  *                                 └─ after(): saveModalAnswer → submit_answer → private message with the truth:
  *                                    "Guardado: …" only when it saved; otherwise "ya cerró" / "no estás" / "no pude guardar"
@@ -40,7 +43,15 @@ function viewFor(game: GameRow, existing: Record<string, unknown> | null) {
 export async function openPlayModal(
   db: SupabaseClient,
   slackFor: SlackFor,
-  input: { gameId: string; slackUserId: string; triggerId: string; responseUrl: string },
+  input: {
+    gameId: string;
+    slackUserId: string;
+    triggerId: string;
+    responseUrl: string;
+    /** Slack's action_ts in ms (when the person tapped) and when our handler started: diagnosis only. */
+    clickedAt?: number;
+    receivedAt?: number;
+  },
 ): Promise<void> {
   const reply = (text: string, blocks?: unknown[]) => postToResponseUrl(input.responseUrl, ephemeral(text, blocks));
 
@@ -77,8 +88,20 @@ export async function openPlayModal(
     if (!slackRes.client) throw slackRes.error;
     await slackRes.client.views.open({ trigger_id: input.triggerId, view });
   } catch (error) {
-    await logEvent(db, { teamId: game.team_id, kind: "modal_failed", gameId: game.id, detail: describeSlackError(error) });
-    await reply(strings.modalFailed);
+    const described = describeSlackError(error);
+    const now = Date.now();
+    await logEvent(db, {
+      teamId: game.team_id,
+      kind: "modal_failed",
+      gameId: game.id,
+      detail: {
+        ...described,
+        ...(input.clickedAt ? { since_tap_ms: now - input.clickedAt } : {}),
+        ...(input.receivedAt ? { handler_ms: now - input.receivedAt } : {}),
+      },
+    });
+    const text = described.code === "expired_trigger_id" ? strings.modalSlow : strings.modalFailed;
+    await reply(text, [section(text), playButton(game.id)]);
   }
 }
 
