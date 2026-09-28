@@ -1,3 +1,4 @@
+import { formatLongDate } from "@/lib/format";
 import { GAME_LABELS, type GameType, type SkipReason } from "@/lib/games/types";
 
 /** Every events.kind has a Spanish label (D-2C). Detail keys are the ones the writers put in `detail`. */
@@ -63,6 +64,8 @@ export const EVENT_KINDS = [
   "fact_failed",
   "member_erased",
   "erase_failed",
+  "vetoed",
+  "admin_alert_failed",
 ] as const;
 export type EventKind = (typeof EVENT_KINDS)[number];
 
@@ -95,8 +98,10 @@ export function eventLabel(kind: string, detail: Detail = {}): string {
       return "Te avisé por mensaje privado";
     case "welcome":
       return "Saludé al canal";
-    case "paused":
-      return `Pausa hasta el ${String(detail.until ?? "")}`.trim();
+    case "paused": {
+      const until = String(detail.until ?? "");
+      return /^\d{4}-\d{2}-\d{2}$/.test(until) ? `Pausa hasta el ${formatLongDate(until)}` : "Pausa";
+    }
     case "resumed":
       return "Ya volvimos";
     case "team_error":
@@ -159,6 +164,10 @@ export function eventLabel(kind: string, detail: Detail = {}): string {
       return "Alguien borró sus datos";
     case "erase_failed":
       return "No pude borrar los datos de alguien";
+    case "vetoed":
+      return `Vetaste ${template(detail)}`;
+    case "admin_alert_failed":
+      return "No pude mandarte un mensaje privado en Slack";
     default:
       return kind;
   }

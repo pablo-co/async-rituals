@@ -34,6 +34,15 @@ export async function futureQueue(db: SupabaseClient, team: TeamRow, now: Date) 
   return (data ?? []) as { id: string; slot_date: string; type: string; status: string; is_sample: boolean }[];
 }
 
+export interface FillResult {
+  created: number;
+  empty: number;
+  /** Slots whose turn was Adivina quién or Dos verdades but had no fresh material (another game took it). */
+  missing: { type: "guess_who" | "two_truths"; slotDate: string }[];
+  /** Generations that threw (AI down, invalid output after the retry). */
+  failures: number;
+}
+
 /** How many Fridays ahead a recap row exists; the tick keeps it true every hour. */
 export const RECAP_WEEKS_AHEAD = 2;
 const POST_WINDOW_MS = 2 * 60 * 60 * 1000;
@@ -113,19 +122,22 @@ export async function fillTeam(
   team: TeamRow,
   now: Date,
   run?: Run,
-): Promise<{ created: number; empty: number }> {
-  if (!team.channel_id) return { created: 0, empty: 0 };
+  opts: { target?: number } = {},
+): Promise<FillResult> {
+  if (!team.channel_id) return { created: 0, empty: 0, missing: [], failures: 0 };
   await ensureRecaps(db, team, now);
 
+  // "Generar otra semana" asks for more than the usual 8 (up to QUEUE_MAX); vetoed dates are free and fill first.
+  const target = opts.target ?? QUEUE_TARGET;
   const future = (await futureQueue(db, team, now)).filter((g) => g.type !== "recap");
-  const needed = QUEUE_TARGET - future.length;
-  if (needed <= 0) return { created: 0, empty: 0 };
+  const needed = target - future.length;
+  if (needed <= 0) return { created: 0, empty: 0, missing: [], failures: 0 };
 
   const candidates = nextSlotDates({
     from: now,
     tz: team.timezone,
     cadence: team.cadence_per_week as Cadence,
-    count: QUEUE_TARGET + 10,
+    count: target + 10,
     pausedUntil: team.paused_until,
   });
   const dates = pickSlotDates(candidates, new Set(future.map((g) => g.slot_date)), needed);
@@ -140,12 +152,16 @@ export async function fillTeam(
   let index = count ?? 0;
   let created = 0;
   let empty = 0;
+  let failures = 0;
+  const missing: FillResult["missing"] = [];
   const ctx: TemplateContext = { db, team, now };
   let previousType: GameType | null = await lastGameType(db, team.id);
 
   for (const slotDate of dates) {
     let generated: GeneratedGame | null = null;
-    for (const type of preferDifferent(availableRotation(index), previousType)) {
+    const errored = new Set<GameType>();
+    const order = preferDifferent(availableRotation(index), previousType);
+    for (const type of order) {
       const template = TEMPLATES[type]!;
       try {
         generated = await template.generate(ctx, { slotDate });
@@ -157,8 +173,15 @@ export async function fillTeam(
           detail: { type, message: (error instanceof Error ? error.message : String(error)).slice(0, 300) },
         });
         generated = null;
+        failures += 1;
+        errored.add(type);
       }
       if (generated) break;
+    }
+    // The slot's turn belonged to a fact-based template that had nothing fresh (admin DM, plan CEO 5 (a)).
+    const intended = order[0];
+    if ((intended === "guess_who" || intended === "two_truths") && generated?.type !== intended && !errored.has(intended)) {
+      missing.push({ type: intended, slotDate });
     }
     index += 1;
     if (!generated) {
@@ -183,5 +206,5 @@ export async function fillTeam(
   }
 
   await logEvent(db, { teamId: team.id, runId: run?.id, kind: "fill_run", detail: { count: created, empty } });
-  return { created, empty };
+  return { created, empty, missing, failures };
 }

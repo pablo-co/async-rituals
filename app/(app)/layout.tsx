@@ -1,6 +1,7 @@
-import type { ReactNode } from "react";
+import { Suspense, type ReactNode } from "react";
 import { AppHeader } from "@/components/AppHeader";
 import { AppNav } from "@/components/AppNav";
+import { Toaster } from "@/components/Toaster";
 
 export default function AppLayout({ children }: { children: ReactNode }) {
   return (
@@ -10,7 +11,9 @@ export default function AppLayout({ children }: { children: ReactNode }) {
       <main id="main" className="page page-narrow has-bottom-nav">
         {children}
       </main>
-      <div className="toast-region" aria-live="polite" />
+      <Suspense fallback={<div className="toast-region" aria-live="polite" />}>
+        <Toaster />
+      </Suspense>
     </>
   );
 }

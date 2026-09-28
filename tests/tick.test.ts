@@ -20,6 +20,13 @@ const POST_TIME = new Date("2026-09-16T16:05:00Z");
 /** 18:05 Mexico City the same day (00:05Z next day): reveal window open, posted_at ≥ 4 h ago. */
 const REVEAL_TIME = new Date("2026-09-17T00:05:00Z");
 
+/** Attempts to post in the ritual channel, failed ones included (not the admin's private DMs). */
+const channelPosts = (slack: ReturnType<typeof fakeSlack>) =>
+  slack.postMessage.mock.calls.filter((c) => (c[0] as { channel?: string }).channel === "C1");
+/** Private DMs to the admin (team fixture: admin_slack_user_id "Um1"). */
+const adminDms = (slack: ReturnType<typeof fakeSlack>) =>
+  slack.calls.filter((c) => c.method === "chat.postMessage" && c.args.channel === "Um1").map((c) => String(c.args.text));
+
 function setup(overrides: { team?: Partial<TeamRow>; game?: Partial<GameRow> | null } = {}) {
   const db = new FakeDb({
     teams: [team(overrides.team)],
@@ -88,13 +95,17 @@ describe("postGame", () => {
     expect(slack.postMessage).not.toHaveBeenCalled();
   });
 
-  it("skips with featured_inactive when the featured member left, without touching Slack", async () => {
+  it("skips with featured_inactive when the featured member left, without posting, and tells the admin privately", async () => {
     const { db, slack, deps, run, currentTeam } = setup({ game: { status: "posting" } });
     db.find("members", "m1").left_at = "2026-09-15T00:00:00Z";
     const result = await postGame(deps(POST_TIME), run, currentTeam(), db.find<GameRow>("games", "g1"));
     expect(result).toBe("skipped");
     expect(db.find("games", "g1")).toMatchObject({ status: "skipped", skip_reason: "featured_inactive", post_attempted_at: null });
-    expect(slack.postMessage).not.toHaveBeenCalled();
+    expect(channelPosts(slack)).toHaveLength(0);
+    expect(adminDms(slack)).toEqual([
+      "Salté Adivina quién del 16 de septiembre: el protagonista ya no participa. Quedan 2 hechos sin usar. " +
+        "Pide a tu equipo un hecho nuevo con /rituales hecho.",
+    ]);
     expect(db.events("skipped")[0].detail).toMatchObject({ reason: "featured_inactive" });
   });
 
@@ -136,7 +147,10 @@ describe("postGame", () => {
     const counts = await tickTeam(deps(later), run, currentTeam());
     expect(counts.swept).toBe(1);
     expect(db.find("games", "g1")).toMatchObject({ status: "skipped", skip_reason: "post_uncertain" });
-    expect(slack.postMessage).toHaveBeenCalledTimes(1);
+    expect(channelPosts(slack)).toHaveLength(1);
+    expect(adminDms(slack)[0]).toBe(
+      "No sé si el juego del 16 de septiembre llegó al canal. Revísalo; si no salió, no lo vuelvo a intentar para no publicarlo dos veces.",
+    );
   });
 
   it("skips a post Slack refused (invalid_blocks) right away, with Slack's reason, instead of 'no sé si llegó'", async () => {
@@ -313,7 +327,47 @@ describe("tickTeam", () => {
     const counts = await tickTeam(deps(POST_TIME), run, currentTeam());
     expect(counts.swept).toBe(1);
     expect(db.find("games", String(due.id))).toMatchObject({ status: "skipped", skip_reason: "sample" });
-    expect(slack.postMessage).not.toHaveBeenCalled();
+    expect(channelPosts(slack)).toHaveLength(0);
+  });
+
+  it("tells the admin once a week when Adivina quién or Dos verdades had nothing fresh, never naming anyone", async () => {
+    const { db, slack, deps, run, currentTeam } = setup({ game: null });
+    await tickTeam(deps(POST_TIME), run, currentTeam());
+    const [dm] = adminDms(slack);
+    expect(dm).toMatch(/^El \d+ de (septiembre|octubre) tocaba Dos verdades y una mentira, pero no hay dos verdades sin usar; puse otro juego\./);
+    expect(dm).not.toMatch(/Pablo|Ana|Luis/);
+    expect(currentTeam().material_alert_sent_at).toBe(POST_TIME.toISOString());
+    expect(db.events("admin_alert")[0].detail).toEqual({ alert: "no_material" });
+
+    // Next day: the queue is low again but the cap holds.
+    for (const g of db.table("games")) if (g.type !== "recap") g.status = "vetoed";
+    await tickTeam(deps(new Date(POST_TIME.getTime() + 24 * 3600_000)), run, currentTeam());
+    expect(adminDms(slack)).toHaveLength(1);
+  });
+
+  it("warns the admin the first time the channel fails, and not again while it stays broken", async () => {
+    const { db, slack, deps, run, currentTeam } = setup({ game: { status: "posting" } });
+    slack.postMessage.mockImplementation(async (args: Record<string, unknown>) => {
+      slack.calls.push({ method: "chat.postMessage", args });
+      if (args.channel === "C1") throw slackPlatformError("not_in_channel");
+      return { ok: true, ts: "1.1" };
+    });
+    await postGame(deps(POST_TIME), run, currentTeam(), db.find<GameRow>("games", "g1"));
+    expect(adminDms(slack)).toEqual([
+      "No puedo publicar en #rituales. Revisa que Rituales siga dentro del canal y vuelve a guardar en Conectar.",
+    ]);
+    db.add("games", game({ id: "g2", status: "posting", slot_date: "2026-09-17" }));
+    await postGame(deps(POST_TIME), run, currentTeam(), db.find<GameRow>("games", "g2"));
+    expect(adminDms(slack)).toHaveLength(1);
+  });
+
+  it("keeps going when the admin DM fails", async () => {
+    const { db, slack, deps, run, currentTeam } = setup({ game: { status: "posting" } });
+    db.find("members", "m1").left_at = "2026-09-15T00:00:00Z";
+    slack.postMessage.mockRejectedValueOnce(slackPlatformError("channel_not_found"));
+    expect(await postGame(deps(POST_TIME), run, currentTeam(), db.find<GameRow>("games", "g1"))).toBe("skipped");
+    expect(db.events("admin_alert_failed")[0].detail).toMatchObject({ alert: "featured_gone", code: "channel_not_found" });
+    expect(currentTeam().material_alert_sent_at).toBeNull();
   });
 
   it("does not refill a disconnected team", async () => {
@@ -361,8 +415,13 @@ describe("Friday recap", () => {
 
     expect(counts).toMatchObject({ revealed: 1, posted: 1 });
     expect(revealedWhenAsked).toEqual([1]); // the recap read the week after g1 was revealed
-    expect(slack.calls.map((c) => c.method)).toEqual(["chat.update", "chat.postMessage", "chat.postMessage"]);
-    const post = slack.calls[2].args;
+    const toChannel = slack.calls.filter((c) => c.args.channel === "C1");
+    expect(toChannel.map((c) => [c.method, c.args.thread_ts ? "thread" : "top"])).toEqual([
+      ["chat.update", "top"],
+      ["chat.postMessage", "thread"],
+      ["chat.postMessage", "top"],
+    ]);
+    const post = toChannel[2].args;
     expect(post.thread_ts).toBeUndefined();
     expect(JSON.stringify(post.blocks)).toContain("*Puntos de la semana:* Ana 3.");
     expect(JSON.stringify(post.blocks)).toContain("1 de 3 jugaron esta semana.");
@@ -380,7 +439,7 @@ describe("Friday recap", () => {
     db.rpcs.recap_data = () => ({ revealed: 0, played: 0, members: 3, top: [], streak: 0, streak_member_ids: [] });
     await tickTeam(deps(FRIDAY_EVENING), run, currentTeam());
     expect(db.find("games", "r1")).toMatchObject({ status: "skipped", skip_reason: "no_answers" });
-    expect(slack.postMessage).not.toHaveBeenCalled();
+    expect(channelPosts(slack)).toHaveLength(0);
   });
 });
 

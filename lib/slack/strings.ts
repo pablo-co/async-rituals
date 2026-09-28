@@ -154,9 +154,31 @@ export const strings = {
   sampleWarning:
     "Sin llave de Anthropic: solo se publican Adivina quién y Dos verdades. Trivia, Esto o aquello y Puzzle esperan la llave.",
 
+  /** Private DMs to the admin (plan CEO 5, D-2D). Never a member's name. */
   admin: {
     channelError: (channel: string) =>
       `No puedo publicar en #${channel}. Revisa que Rituales siga dentro del canal y vuelve a guardar en Conectar.`,
+    /** (a) the fill had no material for a fact-based template and put another game on that day. */
+    noMaterial: (template: string, day: string, material: string, ask: string) =>
+      `El ${day} tocaba ${template}, pero no hay ${material}; puse otro juego. ${ask}`,
+    /** (b) the tick skipped a game about someone who is no longer in the ritual. */
+    featuredGone: (template: string, day: string, remaining: string, ask: string) =>
+      `Salté ${template} del ${day}: el protagonista ya no participa. ${remaining} ${ask}`,
+    /** (d) a template or Slack refused a game. */
+    skipped: (template: string, day: string, reason: string) => `Salté ${template} del ${day}: ${reason}. Los demás juegos siguen normal.`,
+    generationFailed: (failures: number, queued: number) =>
+      `No pude generar juegos hoy (la IA falló ${failures} ${failures === 1 ? "vez" : "veces"}). La cola tiene ${queued}. ` +
+      "Si sigue así mañana, revisa la llave de Anthropic en Conectar.",
+    /** E-1B: the attempt is never repeated, so the admin is the one who looks. */
+    postUncertain: (day: string) =>
+      `No sé si el juego del ${day} llegó al canal. Revísalo; si no salió, no lo vuelvo a intentar para no publicarlo dos veces.`,
+    factsMaterial: { none: "hechos sin usar", left: (n: number) => (n === 1 ? "Queda 1 hecho sin usar." : `Quedan ${n} hechos sin usar.`) },
+    twoTruthsMaterial: {
+      none: "dos verdades sin usar",
+      left: (n: number) => (n === 1 ? "Queda 1 juego de dos verdades sin usar." : `Quedan ${n} juegos de dos verdades sin usar.`),
+    },
+    askFact: "Pide a tu equipo un hecho nuevo con /rituales hecho.",
+    askTwoTruths: "Pide a tu equipo que llene «2 verdades, 1 mentira» en su mensaje «Cuéntanos de ti» de Rituales.",
   },
 
   fallback: {

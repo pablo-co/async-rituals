@@ -1,6 +1,6 @@
 # BUILD-CONTEXT — estado real de la construcción y contexto para lo que falta
 
-Última actualización: 2026-09-28 (hitos 3 y 5 cerrados: puntos, rachas, recap, onboarding por DM, `/rituales hecho`,
+Última actualización: 2026-09-28 (hitos 3, 5 y 6 cerrados: veto, "Generar otra semana", pausa, DM al admin y toasts, además de puntos, rachas, recap, onboarding por DM, `/rituales hecho`,
 `borrar-mis-datos` y Dos verdades; arreglos de "Jugar"/"Enviar" en producción; 7 personas activas en #rituales-bot, 0 hechos
 hasta que contesten el onboarding). Este archivo es el puente entre el plan
 (`docs/plans/async-rituals-mvp-plan.md`, escrito antes de construir) y el código real.
@@ -30,7 +30,7 @@ Documentos de referencia (no repetidos aquí):
 | 3 · Puntos, rachas, recap | ✅ (2026-09-28) | `0002_scores.sql` aplicada; `npm run smoke` 30/30 (puntos por plantilla, rachas, recap, momento, RLS); `tests/{recap,scores}.test.ts` + tick (hitos en el hilo, recap después de los reveals del viernes); primer recap real: viernes 2 de octubre ≥ 18:00 |
 | 4 · Trivia y puzzle por modal | ✅ en producción, jugado por el equipo | trivia y puzzle se juegan desde el 16 de septiembre; arreglados en producción: "Enviar" con error de Slack en arranque en frío (24-sep) y "Jugar" con `expired_trigger_id` (28-sep, ver §6 hito 4) |
 | 5 · Onboarding por modal | ✅ código (2026-09-28); **falta que Pablo actualice el manifest y vuelva a guardar el canal** para que salgan los DMs | `0003_onboarding.sql` aplicada; `tests/{onboarding,onboarding-modal,two-truths}.test.ts`; smoke 31/31 |
-| 6 · Veto, generar, pausa, DM admin, Salud | ⬜ (Salud ya se muestra en Actividad) | — |
+| 6 · Veto, generar, pausa, DM admin, Salud | ✅ (2026-09-28) | `tests/queue-manage.test.ts`, `tests/components/{VetoButton,Toaster}.test.tsx`, tick (DMs al admin: tope, transición de canal, falla suave); hoja de veto revisada en teléfono y escritorio |
 | 7 · stats, README/runbook, pulido escritorio | ⬜ | — |
 
 Infra ya lista: Supabase (proyecto `tpnnocckdmygxfgizefk`, migración 0001), Vercel (`https://async-rituals.vercel.app`,
@@ -98,6 +98,24 @@ Eventos de raicode ya disparados: `build-started`, `needs-supabase-setup`, `supa
   sin esperar a otra sincronización.
 - **`preferDifferent`** manda la plantilla anterior al final **esté donde esté** en el orden (antes solo si iba primera: con Dos
   verdades sin material, `[two_truths, trivia, …]` después de una trivia daba otra trivia).
+- **Toasts (hito 6):** las server actions redirigen con `?toast={saved|published|paused|unpaused|vetoed}` + sus valores
+  (`next`, `channel`, `until`); `components/Toaster.tsx` (store externo con `useSyncExternalStore`, en el layout de `(app)` dentro de
+  `Suspense`) muestra el texto de `lib/toasts.ts` 4 s (máx. 3) y limpia esas llaves de la dirección. Los errores siguen como `<Alert>`.
+- **Veto:** solo filas `queued`, no muestra y fuera de pausa; `vetoGame` exige `status = 'queued'` y el equipo del admin (si ya salió →
+  `?error=veto`). La fila "por rellenar" se esconde en cuanto otro juego toma esa fecha (`visibleQueue`). Vetar un recap deja ese
+  viernes sin recap (`ensureRecaps` nunca lo recrea).
+- **"Generar otra semana":** `fillTeam(…, { target })` con `nextWeekTarget` = futuros + cadencia, mínimo 8 y **máximo `QUEUE_MAX` = 10**
+  (deshabilitado con "La cola ya tiene 10 juegos"); corre en `after()` y Cola hace polling hasta `?want={target}`. Las fechas vetadas
+  se rellenan primero.
+- **Pausa:** fecha inclusiva entre hoy (zona del equipo) y **90 días** (`checkPauseDate`); "Quitar pausa" pone null y registra
+  `resumed`. "Publicar el primero ahora" queda deshabilitado con "En pausa hasta el …". Una pausa vencida no cuenta (`activePause`).
+- **DM al admin (plan CEO 5, `lib/slack/messages/admin-alert.ts`):** con tope de 7 días (`material_alert_sent_at`, una por corrida porque
+  se relee): falta de material en el fill (a), protagonista inactivo al publicar (b), `template_error`/rechazo de Slack al publicar o
+  revelar y fill sin juegos por fallas de IA (d). Sin tope: `channel_error` en su transición (c) y `post_uncertain`. Textos decididos
+  aquí (el plan decía "Salté … del {día}" también para (a), pero el fill actúa sobre días futuros): "El {día} tocaba {plantilla}, pero no
+  hay hechos sin usar; puse otro juego. Pide a tu equipo un hecho nuevo con /rituales hecho." y, para `post_uncertain`, "…si no salió,
+  no lo vuelvo a intentar para no publicarlo dos veces." (el plan decía "el siguiente turno lo repone", que no es cierto: un intento
+  incierto nunca se repite). Nunca nombra a nadie; si el DM falla → `admin_alert_failed` y el tick sigue.
 - El fill desde la web es asíncrono: `saveChannelAction` y `POST /api/queue/fill` (sesión) lo corren en `after()` y responden de
   inmediato; Cola recibe `?generating=1` y `components/QueuePoller.tsx` refresca cada 4 s hasta 20 veces o hasta llenar `QUEUE_TARGET`.
   Con `CRON_SECRET` el fill sigue siendo síncrono (para el cron y para pruebas manuales).
@@ -114,7 +132,9 @@ app/
   page.tsx              aterrizaje: sin sesión → /login · sin canal → /conectar · con canal → /cola
   login/                LoginForm (client): Entrar / Crear cuenta, errores literales D-2A
   (app)/layout.tsx      AppHeader + AppNav + <main class="page page-narrow has-bottom-nav"> + toast-region
-  (app)/conectar/       page.tsx (estados por searchParams) · actions.ts (signOut, saveChannel, publishFirstNow)
+  (app)/conectar/       page.tsx (estados por searchParams, sección Pausa) · actions.ts (signOut, saveChannel, publishFirstNow,
+                        pauseAction, unpauseAction)
+  (app)/cola/actions.ts vetoGameAction, generateWeekAction
   (app)/cola/page.tsx   sin canal: empty-state + vista previa con lib/ai/sample-content.json · con canal: games_admin
   (app)/actividad/      frase grande, meta (lib/activity.ts: sin conteo de onboarding hasta que alguien conteste), Salud, últimos juegos
   api/health            200/503 con nombres de variables faltantes, db, anthropic, slack, cron
@@ -149,6 +169,9 @@ lib/
   games/puzzle.ts       IA; botón Jugar; normalizeAnswer/isAccepted; reveal "La respuesta era: *…*." + "Lo resolvieron …"
   games/two-truths.ts   Dos verdades: 3 frases + botones 1/2/3; score = mentira; reveal "La mentira era: «…»." + hilo; labelFor → la frase
   games/material.ts     pickFreshFact (hecho fresco: sin usar, sin retirar, miembro activo, no reservado en cola; reparte el protagonismo)
+  queue/manage.ts       vetoGame, visibleQueue, pendingGames, nextWeekTarget (QUEUE_MAX 10), vetoTitle/vetoBody, checkPauseDate, activePause
+  toasts.ts             toastText / withoutToast (?toast=…)
+  slack/messages/admin-alert.ts  AdminAlert → adminAlertText; sendAdminAlert (tope de 7 días salvo canal e incierto)
   onboarding.ts         inviteMembers (DM una vez) · openOnboardingModal / openFactModal (after; reintento con botón) ·
                         handleProfileSubmission (valida → clear) · saveOnboarding (diff + veto) · saveFreeFact · eraseMemberData
   commands.ts           /rituales en after(): salir · hecho · borrar-mis-datos (aviso) · stats (hito 7) · ayuda; handleEraseAction
@@ -183,7 +206,9 @@ lib/
   db/session.ts         requireAdmin() → { user, team: TeamRow | null } (redirige a /login)
   supabase/             client.ts (browser) · server.ts (cookies) · admin.ts (service role, server-only)
   ai/sample-content.json  muestras de this_or_that/trivia/puzzle (vista previa de Cola y relleno sin llave)
-components/QueuePoller.tsx  cliente: router.refresh() cada 4 s mientras la cola se genera (?generating=1)
+components/QueuePoller.tsx  cliente: router.refresh() cada 4 s mientras la cola se genera (?generating=1&want=N)
+components/Toaster.tsx      región de toasts del tema (lee ?toast= una vez y limpia la dirección); showToast() para clientes
+components/VetoButton.tsx   "Vetar" + hoja destructiva (foco en Cancelar, Tab atrapado, Esc/clic afuera, foco de vuelta)
 evals/content.test.ts       generación en vivo (opt-in con `npm run eval`; `npm test` la salta)
 supabase/migrations/0001_init.sql   esquema v1 completo (ver §4)
 supabase/migrations/0002_scores.sql game_points, week_points, member_streaks, member_stats, week_moment, recap_data
@@ -338,7 +363,7 @@ Pendiente (hito 6): nada nuevo en esquema; `paused_until`, `material_alert_sent_
   `source = 'onboarding'`; el siguiente fill ya puede crear Adivina quién y Dos verdades.
 - `scripts/seed-facts.ts` queda solo para arranques.
 
-### Hito 6 · Veto, generar, pausa, DM al admin, Salud
+### Hito 6 · Veto, generar, pausa, DM al admin, Salud — ✅ 2026-09-28 (detalle en §2; lo de abajo es el plan original)
 - Cola: botón "Vetar" por fila → `components/VetoSheet.tsx` (hoja/modal del tema, foco en Cancelar, Esc y clic afuera),
   server action `vetoGame` (`update … set status='vetoed' where status='queued'`), fila "por rellenar"; "Generar otra semana"
   → `POST /api/queue/fill` + polling; deshabilitado con ≥ 10 slots.

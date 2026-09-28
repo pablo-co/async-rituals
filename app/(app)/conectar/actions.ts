@@ -6,6 +6,7 @@ import { after } from "next/server";
 import { requireAdmin } from "@/lib/db/session";
 import { logEvent } from "@/lib/events";
 import { inviteMembers } from "@/lib/onboarding";
+import { checkPauseDate } from "@/lib/queue/manage";
 import { fillTeam } from "@/lib/queue/fill";
 import { startRun, finishRun } from "@/lib/runs";
 import { getSlackClient } from "@/lib/slack/client";
@@ -15,7 +16,7 @@ import { welcomeText } from "@/lib/slack/messages/welcome";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { postGame } from "@/lib/tick";
-import { cadenceLabel, nextSlotDates, type Cadence } from "@/lib/time";
+import { cadenceLabel, localParts, nextSlotDates, type Cadence } from "@/lib/time";
 import type { GameRow, MemberRow, TeamRow } from "@/lib/db/types";
 
 export async function signOutAction() {
@@ -110,7 +111,7 @@ export async function saveChannelAction(formData: FormData) {
 
   if (outcome === "join") redirect("/conectar?error=join");
   const next = nextSlotDates({ from: now, tz: team.timezone, cadence: cadence as Cadence, count: 1, pausedUntil: team.paused_until })[0];
-  const params = new URLSearchParams({ saved: "1", next: next ? dayName(next) : cadenceLabel(cadence as Cadence) });
+  const params = new URLSearchParams({ toast: "saved", next: next ? dayName(next) : cadenceLabel(cadence as Cadence) });
   if (warning) params.set("warning", warning);
   if (outcome === "sync") params.set("warning", "sync");
   if (warning || outcome === "sync") redirect(`/conectar?${params.toString()}`);
@@ -152,6 +153,40 @@ export async function publishFirstNowAction() {
   revalidatePath("/conectar");
   revalidatePath("/cola");
   revalidatePath("/actividad");
-  if (result === "posted") redirect(`/conectar?published=1`);
+  if (result === "posted") redirect(`/conectar?${new URLSearchParams({ toast: "published", channel: team.channel_name ?? "" })}`);
   redirect(`/conectar?error=publish&detail=${result}`);
+}
+
+/**
+ * Pausa (plan CEO 3): "Pausar hasta el {fecha}, incluido". Blocks posts only (reveals of what is out keep going);
+ * the fill never creates slots inside it and the sweep skips queued ones as `paused`. Streaks do not break.
+ */
+export async function pauseAction(formData: FormData) {
+  const { team } = await requireAdmin();
+  if (!team) redirect("/conectar?error=not_connected");
+  const today = localParts(new Date(), team.timezone).date;
+  const checked = checkPauseDate(String(formData.get("paused_until") ?? ""), today);
+  if ("error" in checked) redirect(`/conectar?error=${checked.error}`);
+
+  const db = createAdminClient();
+  const { error } = await db.from("teams").update({ paused_until: checked.until }).eq("id", team.id);
+  if (error) redirect("/conectar?error=pause_save");
+  await logEvent(db, { teamId: team.id, kind: "paused", detail: { until: checked.until } });
+
+  revalidatePath("/conectar");
+  revalidatePath("/cola");
+  redirect(`/conectar?${new URLSearchParams({ toast: "paused", until: checked.until })}`);
+}
+
+export async function unpauseAction() {
+  const { team } = await requireAdmin();
+  if (!team) redirect("/conectar?error=not_connected");
+  const db = createAdminClient();
+  const { error } = await db.from("teams").update({ paused_until: null }).eq("id", team.id);
+  if (error) redirect("/conectar?error=pause_save");
+  await logEvent(db, { teamId: team.id, kind: "resumed", detail: { by: "admin" } });
+
+  revalidatePath("/conectar");
+  revalidatePath("/cola");
+  redirect("/conectar?toast=unpaused");
 }

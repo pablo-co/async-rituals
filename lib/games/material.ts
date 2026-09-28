@@ -12,11 +12,29 @@ export interface FreshFact {
   payload: Record<string, unknown>;
 }
 
+/** How many fresh facts of this kind remain (the admin DM says it; never who they belong to). */
+export async function countFreshFacts(ctx: Pick<TemplateContext, "db" | "team">, kind: "fact" | "two_truths", gameType: "guess_who" | "two_truths"): Promise<number> {
+  return (await freshFacts(ctx, kind, gameType)).candidates.length;
+}
+
 export async function pickFreshFact(
   ctx: TemplateContext,
   kind: "fact" | "two_truths",
   gameType: "guess_who" | "two_truths",
 ): Promise<FreshFact | null> {
+  const { candidates, reservedByMember } = await freshFacts(ctx, kind, gameType);
+  if (candidates.length === 0) return null;
+  const load = (f: FreshFact) => reservedByMember.get(f.member_id) ?? 0;
+  const least = Math.min(...candidates.map(load));
+  const pool = candidates.filter((c) => load(c) === least);
+  return pool[Math.floor(Math.random() * pool.length)];
+}
+
+async function freshFacts(
+  ctx: Pick<TemplateContext, "db" | "team">,
+  kind: "fact" | "two_truths",
+  gameType: "guess_who" | "two_truths",
+): Promise<{ candidates: FreshFact[]; reservedByMember: Map<string, number> }> {
   const { db, team } = ctx;
   const { data: reservedRows, error: reservedError } = await db
     .from("games")
@@ -40,15 +58,10 @@ export async function pickFreshFact(
   if (error) throw new TemplateError(error.message, "template_error");
 
   const candidates = ((facts ?? []) as FreshFact[]).filter((f) => !reserved.has(f.id));
-  if (candidates.length === 0) return null;
-
   const reservedByMember = new Map<string, number>();
   for (const row of reservedRows ?? []) {
     const id = (row.payload as { featured_member_id?: string }).featured_member_id;
     if (id) reservedByMember.set(id, (reservedByMember.get(id) ?? 0) + 1);
   }
-  const load = (f: FreshFact) => reservedByMember.get(f.member_id) ?? 0;
-  const least = Math.min(...candidates.map(load));
-  const pool = candidates.filter((c) => load(c) === least);
-  return pool[Math.floor(Math.random() * pool.length)];
+  return { candidates, reservedByMember };
 }

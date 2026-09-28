@@ -3,12 +3,14 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { AnswerRow, GameRow, MemberRow, TeamRow } from "@/lib/db/types";
 import { DbError, TemplateError } from "@/lib/errors";
 import { logEvent } from "@/lib/events";
+import { countFreshFacts } from "@/lib/games/material";
 import { templateFor } from "@/lib/games/registry";
 import type { SkipReason } from "@/lib/games/types";
 import { ensureRecaps, fillTeam, futureQueue, QUEUE_LOW } from "@/lib/queue/fill";
 import { count, finishRun, forEachTeam, startRun, type Run } from "@/lib/runs";
 import { streakMilestoneLine } from "@/lib/scores";
 import { describeSlackError, mapSlackError } from "@/lib/slack/errors";
+import { sendAdminAlert, type AdminAlert } from "@/lib/slack/messages/admin-alert";
 
 /**
  * games state machine, as the tick drives it (one team at a time, `now` injected):
@@ -60,6 +62,23 @@ async function markSkipped(
   });
 }
 
+/** The private DM to the admin (plan CEO 5). Never throws: a failed DM is an event, not a stopped tick. */
+async function alertAdmin(deps: TickDeps, run: Run | undefined, team: TeamRow, alert: AdminAlert): Promise<void> {
+  try {
+    const slack = await deps.slackFor(team);
+    await sendAdminAlert(deps.db, slack, team.id, alert, deps.now, run?.id);
+  } catch (error) {
+    await logEvent(deps.db, {
+      teamId: team.id,
+      runId: run?.id,
+      kind: "admin_alert_failed",
+      detail: { alert: alert.kind, message: (error instanceof Error ? error.message : String(error)).slice(0, 300) },
+    }).catch(() => undefined);
+  }
+}
+
+const channelLabel = (team: TeamRow) => team.channel_name ?? "el canal";
+
 async function claim(db: SupabaseClient, team: TeamRow, kind: "post" | "reveal", now: Date): Promise<GameRow[]> {
   const { data, error } = await db.rpc("claim_due_games", {
     p_team_id: team.id,
@@ -82,6 +101,7 @@ export async function sweepPhase(deps: TickDeps, run: Run | undefined, team: Tea
       gameId: game.id,
       detail: { type: game.type, reason: game.skip_reason },
     });
+    if (game.skip_reason === "post_uncertain") await alertAdmin(deps, run, team, { kind: "uncertain", slotDate: game.slot_date });
   }
   return swept;
 }
@@ -99,6 +119,7 @@ export async function postGame(
   if (!team.channel_id || team.welcomed_channel_id !== team.channel_id) {
     await markSkipped(db, run, game, "channel_error", { why: "channel_not_welcomed" });
     await db.from("teams").update({ channel_error_at: team.channel_error_at ?? nowIso }).eq("id", team.id);
+    if (!team.channel_error_at) await alertAdmin(deps, run, team, { kind: "channel", channel: channelLabel(team) });
     return "skipped";
   }
 
@@ -115,6 +136,12 @@ export async function postGame(
     await markSkipped(db, run, game, reason, {
       message: (error instanceof Error ? error.message : String(error)).slice(0, 300),
     });
+    if (reason === "featured_inactive" && (game.type === "guess_who" || game.type === "two_truths")) {
+      const remaining = await countFreshFacts({ db, team }, game.type === "two_truths" ? "two_truths" : "fact", game.type).catch(() => 0);
+      await alertAdmin(deps, run, team, { kind: "featured_gone", type: game.type, slotDate: game.slot_date, remaining });
+    } else if (reason === "template_error") {
+      await alertAdmin(deps, run, team, { kind: "skipped", type: game.type, slotDate: game.slot_date, reason });
+    }
     return "skipped";
   }
 
@@ -144,6 +171,7 @@ export async function postGame(
     if (failure === "rejected") {
       await logEvent(db, { teamId: team.id, runId: run?.id, kind: "post_failed", gameId: game.id, detail: info });
       await markSkipped(db, run, game, "template_error", info);
+      await alertAdmin(deps, run, team, { kind: "skipped", type: game.type, slotDate: game.slot_date, reason: "template_error" });
       return "skipped";
     }
     if (failure === "channel") {
@@ -151,6 +179,7 @@ export async function postGame(
       if (!team.channel_error_at) {
         await db.from("teams").update({ channel_error_at: nowIso }).eq("id", team.id);
         await logEvent(db, { teamId: team.id, runId: run?.id, kind: "channel_error", detail: info });
+        await alertAdmin(deps, run, team, { kind: "channel", channel: channelLabel(team) });
       }
       return "skipped";
     }
@@ -252,6 +281,7 @@ export async function revealGame(
     if (failure === "rejected") {
       // Retrying the same content would fail every hour forever; clicks on the old post already answer "ya cerró".
       await markSkipped(db, run, game, "template_error", info);
+      await alertAdmin(deps, run, team, { kind: "skipped", type: game.type, slotDate: game.slot_date, reason: "template_error" });
       return "skipped";
     }
     return "deferred"; // stays revealing; reclaimed after 15 min
@@ -287,6 +317,11 @@ export async function tickTeam(deps: TickDeps, run: Run, team: TeamRow): Promise
     if (queued.length < QUEUE_LOW) {
       const filled = await fillTeam(deps.db, current, deps.now, run);
       count(run, "generated", filled.created);
+      if (filled.missing.length > 0) {
+        await alertAdmin(deps, run, current, { kind: "no_material", ...filled.missing[0] });
+      } else if (filled.created === 0 && filled.failures > 0) {
+        await alertAdmin(deps, run, current, { kind: "generation", failures: filled.failures, queued: queued.length });
+      }
     }
   }
 

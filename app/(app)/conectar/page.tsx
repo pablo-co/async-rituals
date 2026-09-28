@@ -8,8 +8,10 @@ import { getSlackClient } from "@/lib/slack/client";
 import { strings } from "@/lib/slack/strings";
 import { listPublicChannels, type ChannelOption } from "@/lib/slack/members";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { CADENCE_DAYS, cadenceLabel, type Cadence } from "@/lib/time";
-import { publishFirstNowAction, saveChannelAction, signOutAction } from "./actions";
+import { formatLongDate } from "@/lib/format";
+import { activePause, PAUSE_MAX_DAYS } from "@/lib/queue/manage";
+import { addDays, CADENCE_DAYS, cadenceLabel, localParts, type Cadence } from "@/lib/time";
+import { pauseAction, publishFirstNowAction, saveChannelAction, signOutAction, unpauseAction } from "./actions";
 
 export const metadata: Metadata = { title: "Conectar" };
 export const dynamic = "force-dynamic";
@@ -17,10 +19,7 @@ export const dynamic = "force-dynamic";
 type Params = {
   connected?: string;
   reconnected?: string;
-  saved?: string;
-  next?: string;
   warning?: string;
-  published?: string;
   error?: string;
   detail?: string;
 };
@@ -35,6 +34,10 @@ const ERRORS: Record<string, string> = {
   not_connected: "Conecta Slack primero.",
   nothing_to_publish: "No hay juegos en cola todavía. Guarda el canal para generar la primera semana.",
   publish: "No pude publicar. Revisa que Rituales siga en el canal y que haya hechos cargados.",
+  pause_date: "Elige una fecha para la pausa.",
+  pause_past: "La pausa tiene que terminar hoy o después.",
+  pause_long: `La pausa puede durar hasta ${PAUSE_MAX_DAYS} días. Elige una fecha más cercana.`,
+  pause_save: "No pude guardar la pausa. Inténtalo de nuevo.",
 };
 
 export default async function ConectarPage({ searchParams }: { searchParams: Promise<Params> }) {
@@ -67,6 +70,8 @@ export default async function ConectarPage({ searchParams }: { searchParams: Pro
     }
   }
 
+  const today = localParts(new Date(), team?.timezone ?? "America/Mexico_City").date;
+  const pausedUntil = activePause(team?.paused_until ?? null, today);
   const errorText = params.error ? (ERRORS[params.error] ?? "No se pudo conectar con Slack. Inténtalo de nuevo.") : null;
 
   return (
@@ -75,10 +80,6 @@ export default async function ConectarPage({ searchParams }: { searchParams: Pro
 
       {params.connected === "1" ? <Alert tone="success">Slack conectado. Ahora elige el canal.</Alert> : null}
       {params.reconnected === "1" ? <Alert tone="success">Slack reconectado.</Alert> : null}
-      {params.saved === "1" ? (
-        <Alert tone="success">Guardado. El próximo juego sale el {params.next ?? "próximo día del ritmo"} por la mañana.</Alert>
-      ) : null}
-      {params.published === "1" ? <Alert tone="success">Publicado en #{team?.channel_name ?? "el canal"}.</Alert> : null}
       {params.warning === "welcome" ? (
         <Alert tone="warning">No pude saludar al canal; revisa que el bot esté dentro y vuelve a guardar.</Alert>
       ) : null}
@@ -162,14 +163,51 @@ export default async function ConectarPage({ searchParams }: { searchParams: Pro
         </section>
       ) : null}
 
+      {connected && team?.channel_id ? (
+        <section className="flex flex-col gap-3" aria-labelledby="pause-heading">
+          <h2 id="pause-heading" className="font-display text-(length:--text-lg)">Pausa</h2>
+          {pausedUntil ? (
+            <>
+              <p className="text-(length:--text-sm)">
+                En pausa hasta el {formatLongDate(pausedUntil)}, incluido. No sale ningún juego esos días; los reveals de lo
+                que ya salió siguen, y las rachas no se rompen.
+              </p>
+              <form action={unpauseAction}>
+                <SubmitButton className="btn-secondary" pendingLabel="Quitando…">Quitar pausa</SubmitButton>
+              </form>
+            </>
+          ) : (
+            <form action={pauseAction} className="flex flex-col gap-4">
+              <div className="flex flex-col gap-1">
+                <label htmlFor="paused_until" className="label-default">Pausar hasta el</label>
+                <input
+                  id="paused_until"
+                  name="paused_until"
+                  type="date"
+                  className="input-default w-full"
+                  min={today}
+                  max={addDays(today, PAUSE_MAX_DAYS)}
+                  required
+                />
+                <p className="help-text">Ese día incluido. Para vacaciones u offsites: no sale ningún juego y las rachas no se rompen.</p>
+              </div>
+              <SubmitButton className="btn-secondary" pendingLabel="Pausando…">Pausar</SubmitButton>
+            </form>
+          )}
+        </section>
+      ) : null}
+
       {connected && team?.channel_id && !hasPosted && hasQueued && activeMembers >= 2 ? (
         <section className="flex flex-col gap-3" aria-labelledby="first-heading">
           <h2 id="first-heading" className="font-display text-(length:--text-lg)">Primer juego</h2>
           <p className="text-muted text-(length:--text-sm)">
             No esperes al horario: publica hoy el primero de la cola en #{team.channel_name}. Se revela en el próximo turno de la tarde.
           </p>
-          <form action={publishFirstNowAction}>
-            <SubmitButton className="btn-secondary" pendingLabel="Publicando…">Publicar el primero ahora</SubmitButton>
+          <form action={publishFirstNowAction} className="flex flex-col gap-1">
+            <SubmitButton className="btn-secondary" pendingLabel="Publicando…" disabled={Boolean(pausedUntil)}>
+              Publicar el primero ahora
+            </SubmitButton>
+            {pausedUntil ? <p className="help-text">En pausa hasta el {formatLongDate(pausedUntil)}.</p> : null}
           </form>
         </section>
       ) : null}
