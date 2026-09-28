@@ -5,8 +5,9 @@ import { Badge } from "@/components/Badge";
 import { EmptyState } from "@/components/EmptyState";
 import { ListRow } from "@/components/ListRow";
 import { getActivity, getAdminTeam } from "@/lib/db/queries";
+import { gameMeta, summaryLine } from "@/lib/activity";
 import { eventLabel } from "@/lib/events/labels";
-import { formatLongDate, formatSlotDate, relativeTime } from "@/lib/format";
+import { formatLongDate, relativeTime } from "@/lib/format";
 import { GAME_LABELS } from "@/lib/games/types";
 import { createClient } from "@/lib/supabase/server";
 
@@ -61,10 +62,7 @@ export default async function ActividadPage() {
       ) : (
         <div className="flex flex-col gap-1">
           <p className="font-display text-(length:--text-2xl) leading-tight">{phrase}</p>
-          <p className="text-muted text-(length:--text-sm)">
-            {activity.games_published} juegos publicados · {activity.onboarded} de{" "}
-            {activity.members} con onboarding
-          </p>
+          <p className="text-muted text-(length:--text-sm)">{summaryLine(activity)}</p>
         </div>
       )}
 
@@ -120,11 +118,7 @@ export default async function ActividadPage() {
               <li key={game.id}>
                 <ListRow
                   title={GAME_LABELS[game.type]}
-                  meta={
-                    game.status === "skipped"
-                      ? `${formatSlotDate(game.slot_date)} · saltado`
-                      : `${formatSlotDate(game.slot_date)} · ${game.answers} respuestas · ${game.correct} acertaron`
-                  }
+                  meta={gameMeta(game)}
                 />
               </li>
             ))}
